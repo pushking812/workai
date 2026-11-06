@@ -80,13 +80,12 @@ let
                             // Добиваем пустыми значениями, если ячейка объединена
                             padded = {txt} & List.Repeat({""}, span - 1)
                         in
-                            [Texts = padded, HasNum = List.Count(FindNodes(cell, "numPr")) > 0]
+                            [Texts = padded]
                     ),
                     // Склеиваем ячейки с учетом gridSpan
-                    flatTexts = List.Combine(List.Transform(cellData, each [Texts])),
-                    hasNum = if List.Count(cellData) > 0 then cellData{0}[HasNum] else false
+                    flatTexts = List.Combine(List.Transform(cellData, each [Texts]))
                 in
-                    [TableID = tblIndex + 1, Texts = flatTexts, HasNum = hasNum]
+                    [TableID = tblIndex + 1, Texts = flatTexts]
             )
         in
             processedRows
@@ -94,33 +93,25 @@ let
     
     AllRowData = List.Combine(ProcessedTables),
 
-    // 7. Расставляем авто-номера (изолированно для каждой таблицы)
-    NumberedRows = List.Accumulate(
-        AllRowData,
-        [Counter = 0, Result = {}],
-        (state, current) =>
-            let
-                // Сбрасываем счетчик при переходе на новую таблицу
-                currentCounter = if current[TableID] <> (if List.Count(state[Result]) > 0 then List.Last(state[Result])[TableID] else current[TableID]) then 0 else state[Counter],
-                newCounter = if current[HasNum] then currentCounter + 1 else currentCounter,
-                texts = current[Texts],
-                newTexts = if current[HasNum] and List.Count(texts) > 0 then 
-                               {Text.From(newCounter)} & List.Skip(texts, 1)
-                           else texts
-            in
-                [Counter = newCounter, Result = state[Result] & { [TableID = current[TableID], Texts = newTexts] }]
-    )[Result],
-
-    // 8. Динамическое выравнивание (Ваш код)
-    МаксКолонок = List.Max(List.Transform(NumberedRows, each List.Count(_[Texts]))),
-    ВыровненныеСтроки = List.Transform(NumberedRows, each {_[TableID]} & _[Texts] & List.Repeat({""}, МаксКолонок - List.Count(_[Texts]))),
+    // 7. Динамическое выравнивание
+    МаксКолонок = List.Max(List.Transform(AllRowData, each List.Count(_[Texts]))),
+    ВыровненныеСтроки = List.Transform(AllRowData, each {_[TableID]} & _[Texts] & List.Repeat({""}, МаксКолонок - List.Count(_[Texts]))),
     ИменаКолонок = {"Таблица"} & List.Transform({1..МаксКолонок}, each "Кол" & Text.From(_)),
 
-    // 9. Сборка финальной таблицы
+    // 8. Сборка финальной таблицы
     ResultTable = Table.FromRows(ВыровненныеСтроки, ИменаКолонок),
     ПовышенниеЗаголовков = Table.PromoteHeaders(ResultTable),
     Переименование1вТаблица = Table.RenameColumns(ПовышенниеЗаголовков,{{"1", "Таблица"}}),
-    ИзмененнияТипа = Table.TransformColumnTypes(Переименование1вТаблица,{{"Таблица", Int64.Type}, {"№#(lf)п/п", Int64.Type}, {"№ в ЛСР", Int64.Type}, {"Наименование работ", type text}, {"Ед.#(lf)изм.", type text}, {"Кол-во", type number}, {"Ссылка на чертежи, спецификации", type text}, {"Формула расчета, расчет объемов работ и расхода материалов", type text}}),
+    ИзмененнияТипа = Table.TransformColumnTypes(Переименование1вТаблица,{
+        {"Таблица", Int64.Type}, 
+        {"№#(lf)п/п", type text},
+        {"№ в ЛСР", type text},
+        {"Наименование работ", type text},
+        {"Ед.#(lf)изм.", type text},
+        {"Кол-во", type number},
+        {"Ссылка на чертежи, спецификации", type text},
+        {"Формула расчета, расчет объемов работ и расхода материалов", type text}
+    }),
     УдалениеПервойСтроки = Table.Skip(ИзмененнияТипа,1),
     ДобавленРаздел = Table.AddColumn(УдалениеПервойСтроки, "Раздел", each let
     // 1. Берем текущую строку

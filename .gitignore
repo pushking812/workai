@@ -3,3 +3,5 @@
 другое/
 *.patch
 *.xlsx
+temp_docx_unpacked/
+*.docx

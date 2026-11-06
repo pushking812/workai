@@ -159,7 +159,7 @@ let
                 words = List.Select(Text.SplitAny(cleanName, " ,-_./\:;()«»"), each _ <> ""),
                 capitalized = List.Transform(
                     words, 
-                    each if Text.Length(_) > 0 then Text.Upper(Text.Start(_, 1)) & Text.Middle(_, 1) else _
+                    each if Text.Length(_) > 1 then Text.Upper(Text.Start(_, 1)) & Text.Range(_, 1, Text.Length(_) - 1) else Text.Upper(_)
                 ),
                 combined = Text.Combine(capitalized, ""),
                 result = if Text.Length(combined) > 20 then
@@ -177,7 +177,7 @@ let
         (i) => {ИсходныеИмена{i}, НовыеИмена{i}}
     )
 in
-    Table.RenameColumns(УдаленныеСтолбцы, Пары)
+    Table.RenameColumns(УдаленныеСтолбцы, Пары),
     ДобавленыСсылкиРазделенные = Table.AddColumn(НормализованныеИмена, "СсылкиРазделенные", each let
     // Берем значение из нормализованной колонки (без запятых и пробелов)
     val = if [СсылкаНаЧерСпе] = null then "" else [СсылкаНаЧерСпе],
@@ -217,7 +217,7 @@ in
                            let 
                                // Вытаскиваем префикс из начала строки, чтобы приклеить к спецификации
                                prefixPart = Text.Start(fullChunk, Text.PositionOf(fullChunk, ".")) 
-                           in prefixPart & Text.Middle(fullChunk, posSpec)
+                           in prefixPart & Text.Range(fullChunk, posSpec, Text.Length(fullChunk) - posSpec)
                        else if hasSpec then fullChunk
                        else null
         in

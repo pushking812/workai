@@ -7,27 +7,6 @@ let
     DocumentXml = Extracted{[FileName="word/document.xml"]}[Content],
     XmlRecord = Xml.Document(DocumentXml),
     
-    // 2. Универсальный поиск узлов
-    FindNodes = (node as any, tag as text) as list =>
-        let
-            res = if node is record then
-                      let
-                          isMatch = if Record.HasFields(node, "Name") and Text.EndsWith(node[Name], tag) then {node} else {},
-                          childTable = if Record.HasFields(node, "Value") and node[Value] is table then node[Value]
-                                       else if Record.HasFields(node, "Table") and node[Table] is table then node[Table]
-                                       else null,
-                          children = if childTable <> null then
-                                         List.Combine(List.Transform(Table.ToRecords(childTable), each @FindNodes(_, tag)))
-                                     else {}
-                      in
-                          isMatch & children
-                  else if node is table then
-                      List.Combine(List.Transform(Table.ToRecords(node), each @FindNodes(_, tag)))
-                  else
-                      {}
-        in
-            res,
-
     // 3. Извлечение текста с переносами
     ExtractText = (node as record) as text =>
         let
@@ -50,8 +29,8 @@ let
     // 4. Извлечение gridSpan (объединенных ячеек)
     GetGridSpan = (cell as record) as number =>
         let
-            tcPr = FindNodes(cell, "tcPr"),
-            gridSpans = if List.Count(tcPr) > 0 then FindNodes(tcPr{0}, "gridSpan") else {},
+            tcPr = fnFindNodes(cell, "tcPr"),
+            gridSpans = if List.Count(tcPr) > 0 then fnFindNodes(tcPr{0}, "gridSpan") else {},
             spanVal = if List.Count(gridSpans) > 0 then 
                           let 
                               attrs = gridSpans{0}[Attributes],
@@ -62,16 +41,16 @@ let
             spanVal,
 
     // 5. Находим ВСЕ таблицы в документе
-    AllTables = FindNodes(XmlRecord, "tbl"),
+    AllTables = fnFindNodes(XmlRecord, "tbl"),
 
     // 6. Обрабатываем каждую таблицу отдельно (добавляем TableID)
     ProcessedTables = List.Transform(List.Positions(AllTables), (tblIndex) =>
         let
             currentTable = AllTables{tblIndex},
-            rows = FindNodes(currentTable, "tr"),
+            rows = fnFindNodes(currentTable, "tr"),
             processedRows = List.Transform(rows, (row) =>
                 let
-                    cells = FindNodes(row, "tc"),
+                    cells = fnFindNodes(row, "tc"),
                     // Для каждой ячейки: извлекаем текст и проверяем gridSpan
                     cellData = List.Transform(cells, (cell) =>
                         let

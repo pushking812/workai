@@ -102,15 +102,16 @@ let
     ResultTable = Table.FromRows(ВыровненныеСтроки, ИменаКолонок),
     ПовышенниеЗаголовков = Table.PromoteHeaders(ResultTable),
     Переименование1вТаблица = Table.RenameColumns(ПовышенниеЗаголовков,{{"1", "Таблица"}}),
-    ИзмененнияТипа = Table.TransformColumnTypes(Переименование1вТаблица,{
+    Нормализованные1 = fnRenameToCanonical(Переименование1вТаблица, СправочникКолонок, {"Таблица"}),
+    ИзмененнияТипа = Table.TransformColumnTypes(Нормализованные1,{
         {"Таблица", Int64.Type}, 
-        {"№#(lf)п/п", type text},
-        {"№ в ЛСР", type text},
-        {"Наименование работ", type text},
-        {"Ед.#(lf)изм.", type text},
-        {"Кол-во", type number},
-        {"Ссылка на чертежи, спецификации", type text},
-        {"Формула расчета, расчет объемов работ и расхода материалов", type text}
+        {"NПП", type text}, 
+        {"NВЛСР", type text}, 
+        {"НаименованиеРабот", type text}, 
+        {"ЕдИзм", type text}, 
+        {"КолВо", type number}, 
+        {"СсылкаНаЧерСпе", type text}, 
+        {"ФормулаРасРасОбъРабИРасМат", type text}
     }),
     УдалениеПервойСтроки = Table.Skip(ИзмененнияТипа,1),
     ДобавленРаздел = Table.AddColumn(УдалениеПервойСтроки, "Раздел", each let
@@ -118,7 +119,7 @@ let
     row = _,
     
     // 2. Получаем имена ВСЕХ колонок в таблице и вычитаем из них наши исключения
-    otherColumns = List.Difference(Record.FieldNames(row), {"Наименование работ", "Таблица"}),
+    otherColumns = List.Difference(Record.FieldNames(row), {"НаименованиеРабот", "Таблица"}),
     
     // 3. Достаем значения из оставшихся колонок
     otherValues = List.Transform(otherColumns, each Record.Field(row, _)),
@@ -130,52 +131,15 @@ let
     isAllOthersEmpty = List.Count(nonEmptyValues) = 0
 in
     // Если все остальные пустые, и в Наименовании есть текст — возвращаем его
-    if isAllOthersEmpty and row[Наименование работ] <> null and row[Наименование работ] <> "" 
-    then row[Наименование работ] 
+    if isAllOthersEmpty and row[НаименованиеРабот] <> null and row[НаименованиеРабот] <> "" 
+    then row[НаименованиеРабот] 
     else null),
     ЗаполнениеВнизРаздел = Table.FillDown(ДобавленРаздел,{"Раздел"}),
     ДобавленУдалитьСтроку = Table.AddColumn(ЗаполнениеВнизРаздел, "Удалить_строку", each if [Раздел] = [Наименование работ] then true else false),
     УдаленыСтрокиРазделов = Table.SelectRows(ДобавленУдалитьСтроку, each ([Удалить_строку] = false)),
     УдаленныеСтолбцы = Table.RemoveColumns(УдаленыСтрокиРазделов,{"Удалить_строку"}),
-    // Новый шаг нормализации имен
-    НормализованныеИмена = 
-let
-    ИсходныеИмена = Table.ColumnNames(УдаленныеСтолбцы),
-    НовыеИмена = List.Transform(
-        ИсходныеИмена,
-        (colName) =>
-            let
-                cleanName0 = Text.Replace(Text.Replace(Text.Replace(colName, "#(lf)", " "), "#(cr)", " "), "#(tab)", " "),
-                cleanName = Text.Replace(cleanName0, "№", "N"),
-                words = 
-                    let
-                        seps = {" ", ",", "-", "_", ".", "/", "\", ":", ";", "(", ")", "«", "»"},
-                        normalized = List.Accumulate(seps, cleanName, (state, sep) => Text.Replace(state, sep, " ")),
-                        splitWords = List.Select(Text.Split(normalized, " "), each _ <> "")
-                    in
-                        splitWords,
-                capitalized = List.Transform(
-                    words, 
-                    each if Text.Length(_) > 1 then Text.Upper(Text.Start(_, 1)) & Text.Range(_, 1, Text.Length(_) - 1) else Text.Upper(_)
-                ),
-                combined = Text.Combine(capitalized, ""),
-                result = if Text.Length(combined) > 20 then
-                            let
-                                firstWord = capitalized{0},
-                                otherWords = List.Transform(List.Skip(capitalized, 1), each Text.Start(_, 3)),
-                                shortened = Text.Combine(List.InsertRange(otherWords, 0, {firstWord}), "")
-                            in shortened
-                         else combined
-            in result
-    ),
-    // Ручная сборка списка пар через индексы — без List.Zip
-    Пары = List.Transform(
-        List.Positions(ИсходныеИмена),
-        (i) => {ИсходныеИмена{i}, НовыеИмена{i}}
-    )
-in
-    Table.RenameColumns(УдаленныеСтолбцы, Пары),
-    ДобавленыСсылкиРазделенные = Table.AddColumn(НормализованныеИмена, "СсылкиРазделенные", each let
+
+    ДобавленыСсылкиРазделенные = Table.AddColumn(УдаленныеСтолбцы, "СсылкиРазделенные", each let
     // Берем значение из нормализованной колонки (без запятых и пробелов)
     val = if [СсылкаНаЧерСпе] = null then "" else [СсылкаНаЧерСпе],
     

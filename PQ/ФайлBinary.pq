@@ -147,46 +147,37 @@ in
     УдаленыСтрокиРазделов = Table.SelectRows(ДобавленУдалитьСтроку, each ([Удалить_строку] = false)),
     УдаленныеСтолбцы = Table.RemoveColumns(УдаленыСтрокиРазделов,{"Удалить_строку"}),
     // Новый шаг нормализации имен
-    НормализованныеИмена = Table.RenameColumns(
-        УдаленныеСтолбцы,
-        List.Zip({
-            Table.ColumnNames(УдаленныеСтолбцы),
-            List.Transform(
-                Table.ColumnNames(УдаленныеСтолбцы),
-                (colName) =>
-                    let
-                        // 1. Заменяем переносы строк, табуляцию на пробел и № на N
-                        cleanName0 = Text.Replace(Text.Replace(Text.Replace(colName, "#(lf)", " "), "#(cr)", " "), "#(tab)", " "),
-                        cleanName = Text.Replace(cleanName0, "№", "N"),
-                        
-                        // 2. Разбиваем очищенное название на слова
-                        words = List.Select(Text.SplitAny(cleanName, " ,-_./\:;()«»"), each _ <> ""),
-                        
-                        // 3. Делаем ЗАГЛАВНОЙ ТОЛЬКО ПЕРВУЮ букву, остальные оставляем как есть
-                        capitalized = List.Transform(
-                            words, 
-                            each if Text.Length(_) > 0 then Text.Upper(Text.Start(_, 1)) & Text.Middle(_, 1) else _
-                        ),
-                        
-                        // 4. Склеиваем в одно слово без пробелов
-                        combined = Text.Combine(capitalized, ""),
-                        
-                        // 5. Если длина больше 20 символов - сокращаем
-                        result = if Text.Length(combined) > 20 then
-                                    let
-                                        firstWord = capitalized{0},
-                                        // Берем по 3 буквы с начала каждого последующего слова
-                                        otherWords = List.Transform(List.Skip(capitalized, 1), each Text.Start(_, 3)),
-                                        shortened = Text.Combine(List.InsertRange(otherWords, 0, {firstWord}), "")
-                                    in 
-                                        shortened
-                                else 
-                                    combined
-                    in
-                        result
-            )
-        })
+    НормализованныеИмена = 
+let
+    ИсходныеИмена = Table.ColumnNames(УдаленныеСтолбцы),
+    НовыеИмена = List.Transform(
+        ИсходныеИмена,
+        (colName) =>
+            let
+                cleanName0 = Text.Replace(Text.Replace(Text.Replace(colName, "#(lf)", " "), "#(cr)", " "), "#(tab)", " "),
+                cleanName = Text.Replace(cleanName0, "№", "N"),
+                words = List.Select(Text.SplitAny(cleanName, " ,-_./\:;()«»"), each _ <> ""),
+                capitalized = List.Transform(
+                    words, 
+                    each if Text.Length(_) > 0 then Text.Upper(Text.Start(_, 1)) & Text.Middle(_, 1) else _
+                ),
+                combined = Text.Combine(capitalized, ""),
+                result = if Text.Length(combined) > 20 then
+                            let
+                                firstWord = capitalized{0},
+                                otherWords = List.Transform(List.Skip(capitalized, 1), each Text.Start(_, 3)),
+                                shortened = Text.Combine(List.InsertRange(otherWords, 0, {firstWord}), "")
+                            in shortened
+                         else combined
+            in result
     ),
+    // Ручная сборка списка пар через индексы — без List.Zip
+    Пары = List.Transform(
+        List.Positions(ИсходныеИмена),
+        (i) => {ИсходныеИмена{i}, НовыеИмена{i}}
+    )
+in
+    Table.RenameColumns(УдаленныеСтолбцы, Пары)
     ДобавленыСсылкиРазделенные = Table.AddColumn(НормализованныеИмена, "СсылкиРазделенные", each let
     // Берем значение из нормализованной колонки (без запятых и пробелов)
     val = if [СсылкаНаЧерСпе] = null then "" else [СсылкаНаЧерСпе],

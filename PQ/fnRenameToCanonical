@@ -1,6 +1,16 @@
 (tbl as table, справочник as table, optional ignoreColumns as list) as table =>
 let
     _ignore = if ignoreColumns = null then {} else ignoreColumns,
+    
+    // Нормализация: переносы/табы → пробел, сжатие пробелов, трим
+    norm = (txt as any) as text =>
+        let
+            s = if txt = null then "" else Text.From(txt),
+            step1 = Text.Replace(Text.Replace(Text.Replace(s, "#(lf)", " "), "#(cr)", " "), "#(tab)", " "),
+            step2 = Text.Trim(step1)
+        in
+            step2,
+    
     фактические = List.Difference(Table.ColumnNames(tbl), _ignore),
     роли = List.Distinct(Table.Column(справочник, "Роль")),
     
@@ -14,13 +24,18 @@ let
                 "Проверьте справочник заголовков."
         else true,
     
-    // 2. Поиск: для каждой роли — первый подходящий вариант
+    // 2. Поиск: сравниваем НОРМАЛИЗОВАННЫЕ строки
     маппинг = List.Transform(роли, (роль) =>
         let
             варианты = Table.Column(
                 Table.SelectRows(справочник, each [Роль] = роль), "Вариант"),
+            вариантыНорм = List.Distinct(
+                List.Select(List.Transform(варианты, each norm(_)), each _ <> "")
+            ),
             найденный = List.First(
-                List.Select(варианты, each List.Contains(фактические, _)),
+                List.Select(фактические, (факт) => 
+                    List.Contains(вариантыНорм, norm(факт))
+                ),
                 null
             )
         in

@@ -5,10 +5,32 @@ let
     shifr = if posCO > -1 then Text.Trim(Text.Start(val, posCO)) else Text.Trim(val),
     listyRaw = if posCO > -1 then Text.Range(val, posCO + 3, Text.Length(val) - posCO - 3) else "",
     
-    firstDigit = Text.PositionOfAny(listyRaw, {"0".."9"}),
+    // Замена Text.PositionOfAny — ищем первый встреченный цифровой символ
+    firstDigit = 
+        let
+            positions = List.RemoveNulls(
+                List.Transform(
+                    {"0".."9"},
+                    each 
+                        let p = Text.PositionOf(listyRaw, _, Occurrence.First) 
+                        in if p = -1 then null else p
+                )
+            )
+        in
+            if List.IsEmpty(positions) then -1 else List.Min(positions),
+    
     listyCut = if firstDigit > -1 then Text.Range(listyRaw, firstDigit, Text.Length(listyRaw) - firstDigit) else Text.Trim(listyRaw),
     step1_fixed = Text.Replace(Text.Replace(Text.Replace(listyCut, "(", ","), ")", ","), ".", "."), 
-    step2 = Text.Select(step1_fixed, {"0".."9", ",", "-", "."}),
+    
+    // Замена Text.Select — разрешены цифры, запятая, дефис и точка
+    step2 = Text.Combine(
+        List.Select(
+            Text.ToList(step1_fixed),
+            each Text.PositionOf("0123456789,-.", _) >= 0
+        ),
+        ""
+    ),
+    
     step2_clean = Text.Replace(Text.Replace(step2, ",-", "-"), "-,", "-"),
     step3 = List.Select(Text.Split(step2_clean, ","), each _ <> ""),
     cleaned = Text.Combine(step3, ","),

@@ -60,28 +60,8 @@ let
         {"ФормулаРасРасОбъРабИРасМат", type text}
     }),
     УдалениеПервойСтроки = Table.Skip(ИзмененнияТипа,1),
-    ДобавленРаздел = Table.AddColumn(УдалениеПервойСтроки, "Раздел", each let
-    // 1. Берем текущую строку
-    row = _,
-    
-    // 2. Получаем имена ВСЕХ колонок в таблице и вычитаем из них наши исключения
-    otherColumns = List.Difference(Record.FieldNames(row), {"НаименованиеРабот", "Таблица"}),
-    
-    // 3. Достаем значения из оставшихся колонок
-    otherValues = List.Transform(otherColumns, each Record.Field(row, _)),
-    
-    // 4. Оставляем только те значения, которые НЕ пустые (не null и не пустая строка "")
-    nonEmptyValues = List.Select(otherValues, each _ <> null and _ <> ""),
-    
-    // 5. Если непустых значений 0 — значит, все остальные колонки пустые
-    isAllOthersEmpty = List.Count(nonEmptyValues) = 0
-in
-    // Если все остальные пустые, и в Наименовании есть текст — возвращаем его
-    if isAllOthersEmpty and row[НаименованиеРабот] <> null and row[НаименованиеРабот] <> "" 
-    then row[НаименованиеРабот] 
-    else null),
-    ЗаполнениеВнизРаздел = Table.FillDown(ДобавленРаздел,{"Раздел"}),
-        ДобавленУдалитьСтроку = Table.AddColumn(ЗаполнениеВнизРаздел, "Удалить_строку", each if [Раздел] = [НаименованиеРабот] then true else false),
+    СРазделом = fnAddSectionColumn(УдалениеПервойСтроки),
+    ДобавленУдалитьСтроку = Table.AddColumn(СРазделом, "Удалить_строку", each if [Раздел] = [НаименованиеРабот] then true else false),
     УдаленыСтрокиРазделов = Table.SelectRows(ДобавленУдалитьСтроку, each ([Удалить_строку] = false)),
     УдаленныеСтолбцы = Table.RemoveColumns(УдаленыСтрокиРазделов,{"Удалить_строку"}),
 

@@ -3,7 +3,7 @@ let
     val = if inputText = null then "" else Text.From(inputText),
     pos = Text.PositionOfAny(val, {".", ",", "/", " ", ":", ";"}, Occurrence.First),
     shifr = if pos > -1 then Text.Trim(Text.Start(val, pos)) else Text.Trim(val),
-    listyRaw = if pos > -1 then Text.Middle(val, pos + 1) else "",
+    listyRaw = if pos > -1 then Text.Range(val, pos + 1, Text.Length(val) - pos - 1) else "",
     
     step1 = Text.Replace(Text.Replace(Text.Replace(listyRaw, "(", ","), ")", ","), ".", ","),
     step2 = Text.Select(step1, {"0".."9", ",", "-"}),

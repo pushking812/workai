@@ -3,10 +3,10 @@ let
     val = if inputText = null then "" else Text.From(inputText),
     posCO = Text.PositionOf(Text.Upper(val), ".СО"),
     shifr = if posCO > -1 then Text.Trim(Text.Start(val, posCO)) else Text.Trim(val),
-    listyRaw = if posCO > -1 then Text.Middle(val, posCO + 3) else "",
+    listyRaw = if posCO > -1 then Text.Range(val, posCO + 3, Text.Length(val) - posCO - 3) else "",
     
     firstDigit = Text.PositionOfAny(listyRaw, {"0".."9"}),
-    listyCut = if firstDigit > -1 then Text.Middle(listyRaw, firstDigit) else Text.Trim(listyRaw),
+    listyCut = if firstDigit > -1 then Text.Range(listyRaw, firstDigit, Text.Length(listyRaw) - firstDigit) else Text.Trim(listyRaw),
     step1_fixed = Text.Replace(Text.Replace(Text.Replace(listyCut, "(", ","), ")", ","), ".", "."), 
     step2 = Text.Select(step1_fixed, {"0".."9", ",", "-", "."}),
     step2_clean = Text.Replace(Text.Replace(step2, ",-", "-"), "-,", "-"),

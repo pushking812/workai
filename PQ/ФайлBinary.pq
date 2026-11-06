@@ -118,7 +118,7 @@ let
 
     // 9. Сборка финальной таблицы
     ResultTable = Table.FromRows(ВыровненныеСтроки, ИменаКолонок),
-    ПовышенниеЗаголовков = Table.PromoteHeaders(ResultTable, [PromoteAllScalars=true]),
+    ПовышенниеЗаголовков = Table.PromoteHeaders(ResultTable),
     Переименование1вТаблица = Table.RenameColumns(ПовышенниеЗаголовков,{{"1", "Таблица"}}),
     ИзмененнияТипа = Table.TransformColumnTypes(Переименование1вТаблица,{{"Таблица", Int64.Type}, {"№#(lf)п/п", Int64.Type}, {"№ в ЛСР", Int64.Type}, {"Наименование работ", type text}, {"Ед.#(lf)изм.", type text}, {"Кол-во", type number}, {"Ссылка на чертежи, спецификации", type text}, {"Формула расчета, расчет объемов работ и расхода материалов", type text}}),
     УдалениеПервойСтроки = Table.Skip(ИзмененнияТипа,1),

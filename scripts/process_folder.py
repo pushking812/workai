@@ -22,13 +22,14 @@ from core.parsers.docx_parser import extract_tables_from_docx, save_table_to_csv
 from core.parsers.header_profiles import parse_table
 from core.parsers.numbering_fix import numbering_fixed
 from core.parsers.stamp_parser import parse_stamp
+from core.statuses import FileStatus
 from core.transformer.schema_analyzer import analyze_and_save_schema
 
 CONVERTED_DIR = os.path.join("data", "converted")
 EXPORTS_DIR = os.path.join("data", "exports")
 SUPPORTED = (".docx", ".doc")
-STATUS_SAVED = "SAVED"
-STATUS_ERROR = "ERROR"
+STATUS_SAVED = FileStatus.SAVED.value
+STATUS_ERROR = FileStatus.ERROR.value
 
 
 def collect_documents(folder: str) -> list[str]:

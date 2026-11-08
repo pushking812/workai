@@ -29,9 +29,25 @@ def convert_doc_to_docx(source_path: str, target_path: str) -> str | None:
     target = os.path.abspath(target_path)
     os.makedirs(os.path.dirname(target), exist_ok=True)
 
+    try:
+        import pythoncom  # noqa: PLC0415
+    except ImportError:
+        pythoncom = None
+
+    # COM в фоновом потоке нужно инициализировать явно (иначе DispatchEx падает).
+    if pythoncom is not None:
+        pythoncom.CoInitialize()
+    try:
+        return _convert_with_word(win32com.client, source, target)
+    finally:
+        if pythoncom is not None:
+            pythoncom.CoUninitialize()
+
+
+def _convert_with_word(client, source: str, target: str) -> str | None:
     word = None
     try:
-        word = win32com.client.DispatchEx("Word.Application")
+        word = client.DispatchEx("Word.Application")
         word.Visible = False
         word.DisplayAlerts = 0
         document = word.Documents.Open(source, ReadOnly=True, AddToRecentFiles=False)

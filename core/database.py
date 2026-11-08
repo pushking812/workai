@@ -337,6 +337,16 @@ def set_file_schema_hash(
     connection.commit()
 
 
+def set_schema_hash_for_file_hash(
+    connection: sqlite3.Connection, file_hash: str, schema_hash: str
+) -> None:
+    """Привязывает схему ко всем записям с этим хэшем содержимого."""
+    connection.execute(
+        "UPDATE files SET schema_hash = ? WHERE hash = ?", (schema_hash, file_hash)
+    )
+    connection.commit()
+
+
 def synonym_key(text: object) -> str:
     """Ключ поиска в справочнике: `normalize_header(text).casefold()`."""
     from core.transformer.schema_analyzer import normalize_header

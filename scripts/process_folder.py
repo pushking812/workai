@@ -21,6 +21,7 @@ from core.hasher import process_file_entry
 from core.parsers.docx_parser import extract_tables_from_docx, save_table_to_csv
 from core.parsers.header_profiles import parse_table
 from core.parsers.stamp_parser import parse_stamp
+from core.transformer.schema_analyzer import analyze_and_save_schema
 
 CONVERTED_DIR = os.path.join("data", "converted")
 EXPORTS_DIR = os.path.join("data", "exports")
@@ -40,9 +41,16 @@ def collect_documents(folder: str) -> list[str]:
     return sorted(paths, key=lambda path: os.path.basename(path).lower())
 
 
-def export_tables(source_path: str, file_hash: str, exports_dir: str) -> str:
-    """Сохраняет таблицы документа в CSV и возвращает пути через `;`."""
+def export_tables(
+    source_path: str, file_hash: str, exports_dir: str, connection=None
+) -> str:
+    """Сохраняет таблицы документа в CSV и возвращает пути через `;`.
+
+    С `connection` схема первой таблицы с заголовками пишется в БД
+    (`files.schema_hash` у файла одна, по главной таблице документа).
+    """
     paths: list[str] = []
+    schema_done = False
     try:
         tables = extract_tables_from_docx(source_path)
     except Exception:  # noqa: BLE001
@@ -51,6 +59,9 @@ def export_tables(source_path: str, file_hash: str, exports_dir: str) -> str:
         if not table:
             continue
         parsed = parse_table(table)
+        if connection is not None and not schema_done and any(parsed.headers):
+            analyze_and_save_schema(connection, parsed.headers, file_hash)
+            schema_done = True
         target = os.path.join(exports_dir, "%s_table_%d.csv" % (file_hash[:16], index))
         paths.append(save_table_to_csv(parsed.rows, target, headers=parsed.headers))
     return ";".join(paths)
@@ -74,7 +85,7 @@ def process_folder(folder: str, db_path: str | None = None, progress: bool = Fal
                 stamp["stamp_status"] = "UNSUPPORTED"
             result = process_file_entry(path, connection, stamp=stamp)
 
-            csv_path = export_tables(stamp_path, result["hash"], exports_dir)
+            csv_path = export_tables(stamp_path, result["hash"], exports_dir, connection)
             document = database.get_file_by_id(connection, result["file_id"]) or {}
             if csv_path:
                 database.update_file_status(connection, result["file_id"], STATUS_SAVED, csv_path)

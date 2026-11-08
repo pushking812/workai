@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 MAX_HEADER_LENGTH = 15
@@ -37,3 +38,32 @@ def normalize_header(text: object) -> str:
             for index, word in enumerate(words)
         ]
     return "".join(words)
+
+
+SCHEMA_SEPARATOR = "|"
+
+
+def generate_schema_hash(normalized_headers: list[str]) -> str:
+    """MD5 от нормализованных заголовков в `casefold()`, склеенных через `|`.
+
+    Входные заголовки нормализуются повторно: `normalize_header` идемпотентна
+    для уже нормализованных строк, а сырые `"№ п/п"` и `"№п/п"` дают один хэш.
+    """
+    keys = [normalize_header(header).casefold() for header in normalized_headers]
+    return hashlib.md5(SCHEMA_SEPARATOR.join(keys).encode("utf-8")).hexdigest()
+
+
+def analyze_and_save_schema(connection, headers: list[str], file_hash: str) -> str | None:
+    """Считает схему по шапке, сохраняет её и привязывает к файлам с этим хэшем.
+
+    Возвращает `schema_hash` или None, если заголовков нет.
+    """
+    from core import database
+
+    if not headers:
+        return None
+    normalized = [normalize_header(header) for header in headers]
+    schema_hash = generate_schema_hash(normalized)
+    database.save_schema(connection, schema_hash, list(headers), normalized)
+    database.set_schema_hash_for_file_hash(connection, file_hash, schema_hash)
+    return schema_hash

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>БД Строительных Документов</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="brand">БД Строительных Документов</div>
+    <div class="actions">
+      <button id="btn-settings" disabled title="Этап 5">Настройки</button>
+      <button id="btn-search" class="primary">Поиск</button>
+      <button id="btn-stop" disabled>Остановить поиск</button>
+      <button id="btn-add">Добавить файл</button>
+      <button id="btn-save" class="accent" disabled>Сохранить</button>
+    </div>
+    <div class="status">
+      <span id="status-text">Готово</span>
+      <progress id="progress" max="100" value="0" hidden></progress>
+    </div>
+  </header>
+
+  <section class="toolbar">
+    <label class="inline"><input type="checkbox" id="chk-background" checked> Фоновый режим</label>
+    <div class="folder">
+      <input type="text" id="input-folder" placeholder="Папка поиска" spellcheck="false">
+      <button id="btn-folder">Обзор…</button>
+    </div>
+    <input type="search" id="input-filter" placeholder="Фильтр по таблице…">
+    <button id="btn-select-all">Выделить все</button>
+    <span id="selected-count" class="muted">Выбрано: 0</span>
+  </section>
+
+  <main class="grid-wrap">
+    <table id="grid">
+      <thead>
+        <tr>
+          <th class="col-check"><input type="checkbox" id="chk-all" title="Выделить все"></th>
+          <th data-sort="doc_code">Шифр документа</th>
+          <th data-sort="revision">Изм.</th>
+          <th data-sort="revision_date">Дата изменения</th>
+          <th data-sort="filename">Имя файла</th>
+          <th data-sort="path" class="col-path">Путь</th>
+          <th data-sort="status">Статус</th>
+          <th data-sort="size">Размер</th>
+          <th data-sort="file_mtime">Дата файла</th>
+        </tr>
+      </thead>
+      <tbody id="grid-body"></tbody>
+    </table>
+    <div id="empty" class="empty" hidden>Файлов пока нет. Нажмите «Поиск» или «Добавить файл».</div>
+  </main>
+
+  <div id="error-popup" class="popup" hidden>
+    <div class="popup-body">
+      <div class="popup-title">Ошибка</div>
+      <pre id="error-text"></pre>
+      <button id="error-close">Закрыть</button>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

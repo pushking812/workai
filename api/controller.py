@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections.abc import Iterable
@@ -75,7 +76,25 @@ class Controller:
             rows = database.list_files(connection)
         finally:
             connection.close()
-        return {"files": rows, "found": self.registrar.get_items()}
+        found = self.registrar.get_items()
+        for item in rows:
+            item.update(_file_stat(item.get("path")))
+        for item in found:
+            item.update(_file_stat(item.get("path")))
+            item["filename"] = os.path.basename(item.get("path") or "")
+        return {"files": rows, "found": found}
+
+    def add_files(self, paths: Iterable[str]) -> dict[str, Any]:
+        """Ручное добавление: те же правила версий, что и у поиска."""
+        added = 0
+        errors: list[str] = []
+        for path in paths or []:
+            try:
+                self.registrar(path)
+                added += 1
+            except Exception as exc:  # noqa: BLE001 — остальные файлы обрабатываем дальше
+                errors.append(f"{path}: {exc}")
+        return {"status": "ok", "added": added, "errors": errors}
 
     def process_selected(self, file_ids: list[int]) -> dict[str, Any]:
         """«Сохранить»: фоновый разбор выбранных файлов."""
@@ -88,6 +107,17 @@ class Controller:
     def stop_tasks(self) -> dict[str, Any]:
         self.tasks.stop()
         return {"status": "stopping"}
+
+
+def _file_stat(path: str | None) -> dict[str, Any]:
+    """Размер и время изменения файла на диске (None, если файла нет)."""
+    try:
+        info = os.stat(path) if path else None
+    except OSError:
+        info = None
+    if info is None:
+        return {"size": None, "file_mtime": None}
+    return {"size": info.st_size, "file_mtime": info.st_mtime}
 
 
 _default: Controller | None = None
@@ -118,6 +148,14 @@ def get_status() -> dict[str, Any]:
 
 def get_files() -> dict[str, Any]:
     return get_controller().get_files()
+
+
+def add_files(paths) -> dict[str, Any]:
+    return get_controller().add_files(paths)
+
+
+def stop_tasks() -> dict[str, Any]:
+    return get_controller().stop_tasks()
 
 
 def process_selected(file_ids: list[int]) -> dict[str, Any]:

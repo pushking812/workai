@@ -7,12 +7,13 @@ revision_date), а не путём к файлу. Путь хранится ка
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from typing import Any, Iterable
 
 DB_PATH = os.path.join("data", "app.db")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 CREATE_FILES_TABLE = """
 CREATE TABLE IF NOT EXISTS files (
@@ -41,7 +42,18 @@ CREATE TABLE IF NOT EXISTS files (
 )
 """
 
+CREATE_SCHEMAS_TABLE = """
+CREATE TABLE IF NOT EXISTS schemas (
+    schema_hash             TEXT PRIMARY KEY,
+    raw_headers_json        TEXT NOT NULL,
+    normalized_headers_json TEXT NOT NULL,
+    mapping_json            TEXT,
+    created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
 CREATE_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_files_schema_hash ON files(schema_hash)",
     "CREATE INDEX IF NOT EXISTS idx_files_doc_code ON files(doc_code)",
     "CREATE INDEX IF NOT EXISTS idx_files_variant_group ON files(variant_group)",
     "CREATE INDEX IF NOT EXISTS idx_files_path ON files(path)",
@@ -99,9 +111,14 @@ def get_connection(db_path: str | None = None) -> sqlite3.Connection:
 
 
 def init_db(db_path: str | None = None) -> sqlite3.Connection:
-    """Создаёт таблицу files и индексы, если их ещё нет."""
+    """Создаёт таблицы files и schemas и индексы, если их ещё нет."""
     connection = get_connection(db_path)
     connection.execute(CREATE_FILES_TABLE)
+    connection.execute(CREATE_SCHEMAS_TABLE)
+    # БД, созданные до Этапа 2, могут не иметь колонки schema_hash.
+    existing = {row["name"] for row in connection.execute("PRAGMA table_info(files)")}
+    if "schema_hash" not in existing:
+        connection.execute("ALTER TABLE files ADD COLUMN schema_hash TEXT")
     for statement in CREATE_INDEXES:
         connection.execute(statement)
     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -219,6 +236,73 @@ def update_file_stamp(
     params.append(file_id)
     connection.execute(f"UPDATE files SET {assignments} WHERE id = ?", tuple(params))
     connection.commit()
+
+
+def save_schema(
+    connection: sqlite3.Connection,
+    schema_hash: str,
+    raw_headers: list[str],
+    normalized_headers: list[str],
+) -> bool:
+    """Сохраняет схему таблицы. Возвращает True, если схема новая.
+
+    Существующую схему не перезаписываем: в ней может лежать `mapping_json`.
+    """
+    cursor = connection.execute(
+        "INSERT OR IGNORE INTO schemas "
+        "(schema_hash, raw_headers_json, normalized_headers_json) VALUES (?, ?, ?)",
+        (
+            schema_hash,
+            json.dumps(raw_headers, ensure_ascii=False),
+            json.dumps(normalized_headers, ensure_ascii=False),
+        ),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def get_schema(connection: sqlite3.Connection, schema_hash: str) -> dict[str, Any] | None:
+    """Схема с распарсенными JSON-полями или None."""
+    row = connection.execute(
+        "SELECT * FROM schemas WHERE schema_hash = ?", (schema_hash,)
+    ).fetchone()
+    if row is None:
+        return None
+    schema = dict(row)
+    schema["raw_headers"] = json.loads(schema.pop("raw_headers_json"))
+    schema["normalized_headers"] = json.loads(schema.pop("normalized_headers_json"))
+    mapping = schema.pop("mapping_json")
+    schema["mapping"] = json.loads(mapping) if mapping else None
+    return schema
+
+
+def set_schema_mapping(
+    connection: sqlite3.Connection, schema_hash: str, mapping: dict[str, Any]
+) -> None:
+    """Записывает итоговое сопоставление заголовков схемы."""
+    connection.execute(
+        "UPDATE schemas SET mapping_json = ? WHERE schema_hash = ?",
+        (json.dumps(mapping, ensure_ascii=False), schema_hash),
+    )
+    connection.commit()
+
+
+def set_file_schema_hash(
+    connection: sqlite3.Connection, file_id: int, schema_hash: str | None
+) -> None:
+    """Привязывает запись файла к схеме его таблицы."""
+    connection.execute(
+        "UPDATE files SET schema_hash = ? WHERE id = ?", (schema_hash, file_id)
+    )
+    connection.commit()
+
+
+def get_files_by_schema(connection: sqlite3.Connection, schema_hash: str) -> list[dict[str, Any]]:
+    """Все файлы с одинаковой структурой таблицы."""
+    cursor = connection.execute(
+        "SELECT * FROM files WHERE schema_hash = ? ORDER BY id", (schema_hash,)
+    )
+    return [dict(row) for row in cursor.fetchall()]
 
 
 def _revision_key(row: dict[str, Any]) -> tuple[int, str]:

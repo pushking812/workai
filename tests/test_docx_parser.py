@@ -121,6 +121,19 @@ def test_extract_headers_banner_row_is_not_a_level():
     assert start == 2
 
 
+def test_extract_headers_continuation_with_dotted_number():
+    """Продолжение таблицы без шапки, первая строка с номером «41.2»."""
+    table = [
+        ["41.2", "", "Плита", "Шт.", "17"],
+        ["", "", "Вестибюль", "", ""],
+        ["", "", "Автоматическая установка", "", ""],
+        ["42", "", "Установка", "Шт.", "1"],
+    ]
+    headers, start = extract_headers(table)
+    assert start == 0
+    assert not any(headers)
+
+
 def test_extract_headers_empty_table():
     assert extract_headers([]) == ([], 0)
 

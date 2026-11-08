@@ -115,11 +115,15 @@ def _is_banner_row(row: list[str]) -> bool:
     return len({cell.casefold() for cell in row}) == 1
 
 
+# «1», «2.», «18)», многоуровневые «41.1», «82.3»
+POSITION_NUMBER_RE = re.compile(r"^\d+(\.\d+)*[.)]?$")
+
+
 def _is_data_row(row: list[str]) -> bool:
-    """Строка данных: первая заполненная ячейка — номер позиции («1», «2.»)."""
+    """Строка данных: первая заполненная ячейка — номер позиции («1», «2.», «41.2»)."""
     for cell in row:
         if cell:
-            return cell.strip().rstrip(".)").isdigit()
+            return POSITION_NUMBER_RE.match(cell.strip()) is not None
     return False
 
 

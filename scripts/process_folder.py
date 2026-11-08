@@ -15,7 +15,7 @@ import argparse
 import os
 import sys
 
-from core import database
+from core import database, exports
 from core.doc_converter import is_doc_file, read_doc_stamp_source
 from core.hasher import process_file_entry
 from core.parsers.docx_parser import extract_tables_from_docx, save_table_to_csv
@@ -40,7 +40,7 @@ def collect_documents(folder: str) -> list[str]:
     return sorted(paths, key=lambda path: os.path.basename(path).lower())
 
 
-def export_tables(source_path: str, file_hash: str) -> str:
+def export_tables(source_path: str, file_hash: str, exports_dir: str) -> str:
     """Сохраняет таблицы документа в CSV и возвращает пути через `;`."""
     paths: list[str] = []
     try:
@@ -51,7 +51,7 @@ def export_tables(source_path: str, file_hash: str) -> str:
         if not table:
             continue
         parsed = parse_table(table)
-        target = os.path.join(EXPORTS_DIR, "%s_table_%d.csv" % (file_hash[:16], index))
+        target = os.path.join(exports_dir, "%s_table_%d.csv" % (file_hash[:16], index))
         paths.append(save_table_to_csv(parsed.rows, target, headers=parsed.headers))
     return ";".join(paths)
 
@@ -59,6 +59,7 @@ def export_tables(source_path: str, file_hash: str) -> str:
 def process_folder(folder: str, db_path: str | None = None, progress: bool = False) -> list[dict]:
     """Прогоняет папку через пайплайн и возвращает строки для таблицы."""
     connection = database.init_db(db_path)
+    exports_dir = exports.exports_dir_for(db_path or database.DB_PATH, EXPORTS_DIR)
     rows: list[dict] = []
     try:
         documents = collect_documents(folder)
@@ -73,7 +74,7 @@ def process_folder(folder: str, db_path: str | None = None, progress: bool = Fal
                 stamp["stamp_status"] = "UNSUPPORTED"
             result = process_file_entry(path, connection, stamp=stamp)
 
-            csv_path = export_tables(stamp_path, result["hash"])
+            csv_path = export_tables(stamp_path, result["hash"], exports_dir)
             document = database.get_file_by_id(connection, result["file_id"]) or {}
             if csv_path:
                 database.update_file_status(connection, result["file_id"], STATUS_SAVED, csv_path)
@@ -150,13 +151,79 @@ def format_rows(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def run_maintenance(args: argparse.Namespace, db_path: str) -> int:
+    """--prune и --drop-db: обслуживание связки «БД -> папка CSV»."""
+    if not os.path.isfile(db_path):
+        print("нет БД: " + db_path, file=sys.stderr)
+        return 2
+    if args.prune and args.drop_db:
+        print("--prune и --drop-db вместе не используются", file=sys.stderr)
+        return 2
+
+    if args.prune:
+        result = exports.prune_exports(db_path, EXPORTS_DIR, apply=args.apply)
+        print("Папка CSV: %s (в БД ссылок: %d)" % (result["folder"], result["referenced"]))
+        print("Сироты (CSV без записи в БД): %d" % len(result["orphans"]))
+        for path in result["orphans"]:
+            print("  " + path)
+        print("Битые ссылки (CSV в БД есть, файла нет): %d" % len(result["missing"]))
+        for file_id, path in result["missing"]:
+            print("  id %d: %s" % (file_id, path))
+        if result["outside"]:
+            print("CSV этой БД вне её папки (старая общая папка): %d" % len(result["outside"]))
+        if result["legacy"]:
+            print("CSV в корне %s, не нужные ни одной БД рядом: %d" % (EXPORTS_DIR, len(result["legacy"])))
+        if args.apply:
+            if result["legacy_moved"]:
+                print("Остатки старой общей папки перенесены в %s: %d"
+                      % (os.path.join(EXPORTS_DIR, exports.LEGACY_DIR), result["legacy_moved"]))
+            copies = sum(1 for _, _, a in result["migrated"] if a == "copy")
+            print("Перенесено в папку БД: %d (из них скопировано, т.к. нужны другой БД: %d)"
+                  % (len(result["migrated"]), copies))
+            print("Перенесено в _orphans: %d" % len(result["moved"]))
+        elif result["orphans"] or result["outside"] or result["legacy"]:
+            print("Ничего не перенесено; для переноса добавьте --apply")
+        return 0
+
+    result = exports.drop_database(
+        db_path, EXPORTS_DIR, archive=not args.no_archive, dry_run=args.dry_run
+    )
+    prefix = "[пробный запуск] " if args.dry_run else ""
+    action = "в архив" if result["archive_dir"] else "удалено"
+    print("%sCSV из БД %s: %d" % (prefix, action, len(result["csv_done"])))
+    print("%sПрочие файлы папки %s: %d" % (prefix, action, len(result["leftovers"])))
+    if result["csv_missing"]:
+        print("%sCSV из БД уже нет на диске: %d" % (prefix, len(result["csv_missing"])))
+    if result["csv_foreign"]:
+        print("%sНе тронуты CSV вне папки этой БД (могут быть нужны другим базам): %d"
+              % (prefix, len(result["csv_foreign"])))
+    print("%sБД %s: %s" % (prefix, action, ", ".join(result["db"]) or "-"))
+    if result["archive_dir"] and not args.dry_run:
+        print("Архив: " + result["archive_dir"])
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Разбор штампов папки в БД")
     parser.add_argument("folder", nargs="?", default="ВОР", help="папка с документами")
     parser.add_argument("--db", default=None, help="путь к файлу БД")
     parser.add_argument("--verbose", action="store_true",
                         help="напечатать таблицу реквизитов штампа в stdout")
+    parser.add_argument("--prune", action="store_true",
+                        help="сверить БД и её папку CSV, показать сирот и битые ссылки (папка не обрабатывается)")
+    parser.add_argument("--apply", action="store_true",
+                        help="вместе с --prune: перенести сирот в _orphans/")
+    parser.add_argument("--drop-db", action="store_true",
+                        help="удалить БД: сначала её CSV, потом сам файл БД (по умолчанию — в архив data/archive)")
+    parser.add_argument("--no-archive", action="store_true",
+                        help="вместе с --drop-db: удалить насовсем, без архива")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="вместе с --drop-db: только показать, что будет сделано")
     args = parser.parse_args(argv)
+
+    db_path = args.db or database.DB_PATH
+    if args.prune or args.drop_db:
+        return run_maintenance(args, db_path)
 
     if not os.path.isdir(args.folder):
         print("нет папки: " + args.folder, file=sys.stderr)
@@ -164,8 +231,9 @@ def main(argv: list[str] | None = None) -> int:
 
     rows = process_folder(args.folder, args.db, progress=True)
 
-    os.makedirs(EXPORTS_DIR, exist_ok=True)
-    report_path = os.path.join(EXPORTS_DIR, "_report_%s.tsv" % os.path.basename(os.path.abspath(args.folder)))
+    exports_dir = exports.exports_dir_for(db_path, EXPORTS_DIR)
+    os.makedirs(exports_dir, exist_ok=True)
+    report_path = os.path.join(exports_dir, "_report_%s.tsv" % os.path.basename(os.path.abspath(args.folder)))
     with open(report_path, "w", encoding="utf-8-sig", newline="") as handle:
         handle.write(format_rows(rows))
     if args.verbose:
@@ -176,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         counts[row["result"]] = counts.get(row["result"], 0) + 1
     errors = [row["file"] for row in rows if row["status"] == STATUS_ERROR]
     print("Файлов: %d (%s)" % (len(rows), ", ".join("%s: %d" % item for item in sorted(counts.items()))))
-    print("CSV: %s" % EXPORTS_DIR)
+    print("CSV: %s" % exports_dir)
     print("Отчёт по штампам: %s" % report_path)
     if errors:
         print("Ошибки (%d): %s" % (len(errors), "; ".join(errors)))

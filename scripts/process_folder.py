@@ -56,12 +56,16 @@ def export_tables(source_path: str, file_hash: str) -> str:
     return ";".join(paths)
 
 
-def process_folder(folder: str, db_path: str | None = None) -> list[dict]:
+def process_folder(folder: str, db_path: str | None = None, progress: bool = False) -> list[dict]:
     """Прогоняет папку через пайплайн и возвращает строки для таблицы."""
     connection = database.init_db(db_path)
     rows: list[dict] = []
     try:
-        for path in collect_documents(folder):
+        documents = collect_documents(folder)
+        for number, path in enumerate(documents, start=1):
+            if progress:
+                print("[%d/%d] %s ..." % (number, len(documents), os.path.basename(path)),
+                      end=" ", file=sys.stderr, flush=True)
             stamp_path = read_doc_stamp_source(path, CONVERTED_DIR)
             stamp = parse_stamp(stamp_path)
             if is_doc_file(path) and stamp_path == path:
@@ -90,6 +94,9 @@ def process_folder(folder: str, db_path: str | None = None) -> list[dict]:
                     "variant_group": document.get("variant_group"),
                 }
             )
+            if progress:
+                print("%s, CSV: %d" % (result["result"], len(csv_path.split(";")) if csv_path else 0),
+                      file=sys.stderr, flush=True)
     finally:
         connection.close()
     return rows
@@ -147,15 +154,32 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Разбор штампов папки в БД")
     parser.add_argument("folder", nargs="?", default="ВОР", help="папка с документами")
     parser.add_argument("--db", default=None, help="путь к файлу БД")
+    parser.add_argument("--verbose", action="store_true",
+                        help="напечатать таблицу реквизитов штампа в stdout")
     args = parser.parse_args(argv)
 
     if not os.path.isdir(args.folder):
         print("нет папки: " + args.folder, file=sys.stderr)
         return 2
 
-    rows = process_folder(args.folder, args.db)
-    print(format_rows(rows))
-    print("\nвсего: %d" % len(rows))
+    rows = process_folder(args.folder, args.db, progress=True)
+
+    os.makedirs(EXPORTS_DIR, exist_ok=True)
+    report_path = os.path.join(EXPORTS_DIR, "_report_%s.tsv" % os.path.basename(os.path.abspath(args.folder)))
+    with open(report_path, "w", encoding="utf-8-sig", newline="") as handle:
+        handle.write(format_rows(rows))
+    if args.verbose:
+        print(format_rows(rows))
+
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["result"]] = counts.get(row["result"], 0) + 1
+    errors = [row["file"] for row in rows if row["status"] == STATUS_ERROR]
+    print("Файлов: %d (%s)" % (len(rows), ", ".join("%s: %d" % item for item in sorted(counts.items()))))
+    print("CSV: %s" % EXPORTS_DIR)
+    print("Отчёт по штампам: %s" % report_path)
+    if errors:
+        print("Ошибки (%d): %s" % (len(errors), "; ".join(errors)))
     return 0
 
 

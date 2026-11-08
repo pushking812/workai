@@ -936,6 +936,23 @@ def read_executors(rows: list[list[str]]) -> list[dict[str, str]]:
     return executors
 
 
+def _collapse_table(rows: list[list[str]]) -> list[list[str]]:
+    """Схлопывает подряд идущие одинаковые значения в строке (для stamp_raw).
+
+    Объединённые ячейки разворачиваются в сетку и дают много копий;
+    для отладки достаточно одной. Пустые значения не схлопываются.
+    """
+    collapsed = []
+    for row in rows:
+        out: list[str] = []
+        for cell in row:
+            if out and cell and cell == out[-1]:
+                continue
+            out.append(cell)
+        collapsed.append(out)
+    return collapsed
+
+
 def parse_stamp(file_path: str) -> dict[str, Any]:
     """Разбирает штамп документа и возвращает его реквизиты.
 
@@ -994,7 +1011,7 @@ def parse_stamp(file_path: str) -> dict[str, Any]:
         values[LABEL_REVISION] = "0"
 
     result["stamp_raw"] = json.dumps(
-        {"values": values, "tables": tables},
+        {"values": values, "tables": [_collapse_table(rows) for rows in tables]},
         ensure_ascii=False,
     )
 

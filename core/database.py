@@ -13,7 +13,9 @@ import sqlite3
 from typing import Any, Iterable
 
 DB_PATH = os.path.join("data", "app.db")
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
+# Версия, добавившая блок «Маркировка кабелей» (V7_KZH_NAMES).
+SYNONYMS_V7_VERSION = 7
 # Версия, добавившая блок «Проход через» (V6_KZH_NAMES).
 SYNONYMS_V6_VERSION = 6
 # Версия схемы, в которой справочник синонимов заполняется базовым набором.
@@ -128,7 +130,24 @@ KZH_SYNONYMS: dict[str, tuple[str, ...]] = {
     ),
     "ПроходЧерез|Трубу|ДлинаМ": ("проход через трубу длина м",),
     "ПроходЧерез|ПротяжЯщикN": ("проход через протяж ящик, №",),
+    # Версия 7: блок «Маркировка кабелей» (бирки).
+    "NКабеляИЦвеБир": (
+        "№ кабеля и цвет бирки",
+        "маркировка кабелей № кабеля и цвет бирки",
+    ),
+    "МаркировкаКабелей|СторонаБирки|Лицевая": (
+        "маркировка кабелей сторона бирки лицевая",
+    ),
+    "МаркировкаКабелей|СторонаБирки|Оборотная": (
+        "маркировка кабелей сторона бирки оборотная",
+    ),
 }
+
+V7_KZH_NAMES: tuple[str, ...] = (
+    "NКабеляИЦвеБир",
+    "МаркировкаКабелей|СторонаБирки|Лицевая",
+    "МаркировкаКабелей|СторонаБирки|Оборотная",
+)
 
 V6_KZH_NAMES: tuple[str, ...] = (
     "ПроходЧерез|Трубу|Обозначение",
@@ -228,13 +247,15 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
             migrate_synonyms_v5(connection)
         if previous_version < SYNONYMS_V6_VERSION:
             migrate_synonyms_v6(connection)
+        if previous_version < SYNONYMS_V7_VERSION:
+            migrate_synonyms_v7(connection)
     return connection
 
 
 def migrate_synonyms_v5(connection: sqlite3.Connection) -> None:
     """БД версии 4 -> 5: канонические имена КЖ. Существующие записи не меняются."""
     for canonical, synonyms in KZH_SYNONYMS.items():
-        if canonical in V6_KZH_NAMES:
+        if canonical in V6_KZH_NAMES or canonical in V7_KZH_NAMES:
             continue
         for synonym in (canonical, *synonyms):
             add_synonym(connection, canonical, synonym, 1.0)
@@ -243,6 +264,13 @@ def migrate_synonyms_v5(connection: sqlite3.Connection) -> None:
 def migrate_synonyms_v6(connection: sqlite3.Connection) -> None:
     """БД версии 5 -> 6: блок «Проход через». Существующие записи не меняются."""
     for canonical in V6_KZH_NAMES:
+        for synonym in (canonical, *KZH_SYNONYMS[canonical]):
+            add_synonym(connection, canonical, synonym, 1.0)
+
+
+def migrate_synonyms_v7(connection: sqlite3.Connection) -> None:
+    """БД версии 6 -> 7: блок «Маркировка кабелей». Существующие записи не меняются."""
+    for canonical in V7_KZH_NAMES:
         for synonym in (canonical, *KZH_SYNONYMS[canonical]):
             add_synonym(connection, canonical, synonym, 1.0)
 

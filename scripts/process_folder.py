@@ -18,7 +18,8 @@ import sys
 from core import database
 from core.doc_converter import is_doc_file, read_doc_stamp_source
 from core.hasher import process_file_entry
-from core.parsers.docx_parser import extract_headers, extract_tables_from_docx, save_table_to_csv
+from core.parsers.docx_parser import extract_tables_from_docx, save_table_to_csv
+from core.parsers.header_profiles import parse_table
 from core.parsers.stamp_parser import parse_stamp
 
 CONVERTED_DIR = os.path.join("data", "converted")
@@ -49,9 +50,9 @@ def export_tables(source_path: str, file_hash: str) -> str:
     for index, table in enumerate(tables, start=1):
         if not table:
             continue
-        headers, data_start = extract_headers(table)
+        parsed = parse_table(table)
         target = os.path.join(EXPORTS_DIR, "%s_table_%d.csv" % (file_hash[:16], index))
-        paths.append(save_table_to_csv(table, target, headers=headers, data_start=data_start))
+        paths.append(save_table_to_csv(parsed.rows, target, headers=parsed.headers))
     return ";".join(paths)
 
 

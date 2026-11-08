@@ -13,9 +13,12 @@ from __future__ import annotations
 import csv
 import os
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from docx2python import docx2python
+
+from core.transformer.schema_analyzer import normalize_header
 
 HEADER_SCAN_DEPTH = 3
 MEDIA_RE = re.compile(r"^-+media/[^-]+-+")
@@ -101,6 +104,17 @@ def _is_group_row(row: list[str], header_start: int | None = None) -> bool:
     return len(text) >= 2
 
 
+def _is_banner_row(row: list[str]) -> bool:
+    """Заголовок документа на всю ширину таблицы («ВЕДОМОСТЬ ОБЪЁМОВ РАБОТ»).
+
+    docx2python повторяет объединённую ячейку в каждой колонке; это название
+    таблицы, а не уровень шапки.
+    """
+    if len(row) < 3 or not all(row):
+        return False
+    return len({cell.casefold() for cell in row}) == 1
+
+
 def _is_data_row(row: list[str]) -> bool:
     """Строка данных: первая заполненная ячейка — номер позиции («1», «2.»)."""
     for cell in row:
@@ -109,18 +123,53 @@ def _is_data_row(row: list[str]) -> bool:
     return False
 
 
-def extract_headers(table: list[list[str]]) -> tuple[list[str], int]:
-    """Собирает шапку таблицы и возвращает её вместе с индексом первой строки данных.
+def _collapse_repeats(parts: list[str]) -> list[str]:
+    """Убирает подряд идущие одинаковые уровни шапки (объединённые ячейки)."""
+    out: list[str] = []
+    for part in parts:
+        if not out or out[-1].casefold() != part.casefold():
+            out.append(part)
+    return out
 
-    Строка нумерации колонок отбрасывается. Строка-группа не становится
-    заголовком колонки: её текст запоминается как префикс для подзаголовков,
-    которые идут ниже.
-    """
+
+LEVEL_SEPARATOR = "|"
+
+
+@dataclass
+class HeaderScan:
+    """Результат разбора шапки до склейки уровней."""
+
+    levels: list[list[str]]  # уровни каждой колонки (сырые, без схлопывания)
+    positions: list[list[int]]  # номера строк шапки, из которых взяты уровни
+    header_rows: int  # сколько строк заняла шапка
+    data_start: int
+    group_prefix: str
+    hierarchical: bool  # есть объединение ячеек по горизонтали над колонками
+
+    @property
+    def width(self) -> int:
+        return len(self.levels)
+
+    def is_orphan(self, index: int) -> bool:
+        """Колонка без родительских уровней: в шапке есть только последняя строка или ничего.
+
+        Это артефакт сетки docx (лишняя ячейка в нижней строке шапки).
+        """
+        if not self.hierarchical or self.header_rows < 2:
+            return False
+        positions = self.positions[index]
+        return not positions or (len(positions) == 1 and positions[0] == self.header_rows - 1)
+
+
+def scan_headers(table: list[list[str]]) -> HeaderScan:
+    """Находит строки шапки и раскладывает их по колонкам."""
     if not table:
-        return [], 0
+        return HeaderScan([], [], 0, 0, "", False)
 
     width = max(len(row) for row in table)
-    headers: list[list[str]] = [[] for _ in range(width)]
+    levels: list[list[str]] = [[] for _ in range(width)]
+    positions: list[list[int]] = [[] for _ in range(width)]
+    used_rows: list[list[str]] = []
     group_prefix = ""
     data_start = len(table)
 
@@ -131,27 +180,64 @@ def extract_headers(table: list[list[str]]) -> tuple[list[str], int]:
         if is_numbering_row(normalised, width):
             data_start = index + 1
             break
-        if any(headers) and _is_data_row(normalised):
+        if any(levels) and _is_data_row(normalised):
             break
+        if _is_banner_row(normalised):
+            continue
         if _is_group_row(normalised):
             group_prefix = normalised[[i for i, c in enumerate(normalised) if c][0]]
             continue
-        headers = [headers[i] + ([cell] if cell else []) for i, cell in enumerate(normalised)]
+        for column, cell in enumerate(normalised):
+            if cell:
+                levels[column].append(cell)
+                positions[column].append(len(used_rows))
+        used_rows.append(normalised)
         data_start = index + 1
 
-    result: list[str] = []
-    for parts in headers:
-        if len(parts) > 1:
-            # Соседние заголовки-родитель/подзаголовок («Родитель Подзаголовок»).
-            joined = " ".join(parts)
-        else:
-            joined = parts[0] if parts else ""
-        if group_prefix and joined:
-            joined = f"{group_prefix} {joined}"
-        elif group_prefix and not joined:
-            joined = ""
-        result.append(joined)
-    return result, data_start
+    # Объединённая по горизонтали ячейка над колонками docx2python повторяет
+    # в каждой покрытой колонке; смотрим все строки шапки, кроме нижней.
+    hierarchical = any(
+        row[i] and row[i].casefold() == row[i + 1].casefold()
+        for row in used_rows[:-1]
+        for i in range(width - 1)
+    )
+    return HeaderScan(levels, positions, len(used_rows), data_start, group_prefix, hierarchical)
+
+
+def join_levels(scan: HeaderScan, index: int) -> str:
+    """Имя колонки из её уровней.
+
+    Иерархическая шапка: каждый уровень нормализуется (`normalize_header`),
+    одинаковые подряд идущие уровни схлопываются, склейка через `|`.
+    Плоская шапка (многострочные заголовки): уровни через пробел как есть.
+    """
+    parts = scan.levels[index]
+    if scan.hierarchical:
+        normalised = [normalize_header(part) for part in parts]
+        if scan.group_prefix:
+            normalised.insert(0, normalize_header(scan.group_prefix))
+        return LEVEL_SEPARATOR.join(_collapse_repeats([part for part in normalised if part]))
+
+    # docx2python повторяет текст объединённой ячейки в каждой покрытой
+    # колонке/строке: подряд идущие одинаковые уровни схлопываем.
+    parts = _collapse_repeats(parts)
+    joined = " ".join(parts)
+    if scan.group_prefix and joined:
+        joined = f"{scan.group_prefix} {joined}"
+    return joined
+
+
+def extract_headers(table: list[list[str]]) -> tuple[list[str], int]:
+    """Собирает шапку таблицы и возвращает её вместе с индексом первой строки данных.
+
+    Строка нумерации колонок отбрасывается. Строка-группа не становится
+    заголовком колонки: её текст запоминается как префикс для подзаголовков,
+    которые идут ниже. Если над колонками есть объединённые ячейки
+    (кабельный журнал), имя колонки — нормализованные уровни через `|`:
+    `КабельПровод|ПоПроекту|Марка`.
+    """
+    scan = scan_headers(table)
+    return [join_levels(scan, index) for index in range(scan.width)], scan.data_start
 
 
 def save_table_to_csv(

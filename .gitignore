@@ -9,3 +9,24 @@ temp_docx_unpacked/
 ЕСТ-ПМ-80825-Р-1-ИСВН (кн. 1_ кн. 2)_ВОР.docx.bak
 after.csv
 before.csv
+
+# Этап 1: данные и служебное
+data/
+__pycache__/
+*.pyc
+*.db
+.pytest_cache/
+
+# Исходные документы (Word) и их конвертация
+*.doc
+КЖ/
+СО/
+_conv/
+_conv*.docx
+
+# Временные скрипты и выгрузки отладки
+_dump_*.py
+_run_all.py
+_vor_*
+1.py
+*.bak

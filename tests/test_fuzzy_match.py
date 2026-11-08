@@ -50,3 +50,38 @@ def test_empty_header_and_empty_dictionary(tmp_path):
     none = find_best_match(connection, "Количество")
     assert none["suggested_canonical"] is None
     assert none["requires_manual_review"] is True
+
+
+def test_hyphen_abbreviation_matches_full_word(tmp_path):
+    connection = _db(tmp_path)
+    connection.execute("DELETE FROM header_synonyms WHERE synonym_normalized = 'колво'")
+    connection.commit()
+    for header in ("Кол-во", "кол.-во", "Колич-во"):
+        result = find_best_match(connection, header)
+        assert result["suggested_canonical"] == "КолВо", header
+        assert result["score"] == 90.0
+        assert result["requires_manual_review"] is False
+        assert result["method"] == "abbreviation"
+
+
+def test_hyphen_abbreviation_for_non_seed_word(tmp_path):
+    connection = _db(tmp_path)
+    result = find_best_match(connection, "Наим-ние")
+    assert result["suggested_canonical"] == "НаименованиеРабот"
+    assert result["requires_manual_review"] is False
+
+
+def test_hyphen_abbreviation_ignores_short_or_foreign(tmp_path):
+    connection = _db(tmp_path)
+    for header in ("р-н", "в-во", "Кол-вы", "Ж-д путь"):
+        result = find_best_match(connection, header)
+        assert result.get("method") != "abbreviation", header
+        assert result["requires_manual_review"] is True, header
+
+
+def test_kol_vo_is_exact_synonym(tmp_path):
+    connection = _db(tmp_path)
+    for header in ("Кол-во", "Количество"):
+        result = find_best_match(connection, header)
+        assert result["suggested_canonical"] == "КолВо"
+        assert result["is_exact_match"] is True

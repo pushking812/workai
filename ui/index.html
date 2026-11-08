@@ -8,50 +8,101 @@
 </head>
 <body>
   <header class="header">
-    <div class="brand">БД Строительных Документов</div>
     <div class="actions">
-      <button id="btn-settings" disabled title="Этап 5">Настройки</button>
-      <button id="btn-search" class="primary">Поиск</button>
-      <button id="btn-stop" disabled>Остановить поиск</button>
-      <button id="btn-add">Добавить файл</button>
-      <button id="btn-save" class="accent" disabled>Сохранить</button>
+      <button id="btn-settings" class="icon" title="Настройки">
+        <svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+      </button>
+      <button id="btn-search" class="icon primary" title="Поиск файлов в папках из настроек">
+        <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
+      </button>
+      <button id="btn-stop" class="icon" title="Остановить поиск" disabled>
+        <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+      </button>
+      <button id="btn-add" class="icon" title="Добавить файл вручную">
+        <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg>
+      </button>
+      <button id="btn-hide" class="icon" title="Скрыть выделенные файлы" disabled>
+        <svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg>
+      </button>
+      <button id="btn-show-hidden" class="icon" title="Показать скрытые файлы">
+        <svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+      <button id="btn-save" class="icon accent" title="Сохранить выделенные файлы" disabled>
+        <svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v6h8V3M7 21v-7h10v7"/></svg>
+      </button>
+      <button id="btn-exit" class="icon danger" title="Выход">
+        <svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>
+      </button>
     </div>
-    <div class="status">
-      <span id="status-text">Готово</span>
-      <progress id="progress" max="100" value="0" hidden></progress>
-    </div>
+    <label class="inline" title="Поиск идёт в фоне, окно остаётся доступным"><input type="checkbox" id="chk-background" checked> Фоновый режим</label>
+    <input type="search" id="input-filter" placeholder="Фильтр…" title="Фильтр по таблице">
+    <button id="btn-select-all" class="icon small" title="Выделить все">
+      <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg>
+    </button>
+    <label class="inline" title="Структура дерева записей">Дерево:
+      <select id="select-tree">
+        <option value="type-section">Тип документа → Код раздела</option>
+        <option value="section-type">Код раздела → Тип документа</option>
+      </select>
+    </label>
   </header>
-
-  <section class="toolbar">
-    <label class="inline"><input type="checkbox" id="chk-background" checked> Фоновый режим</label>
-    <div class="folder">
-      <input type="text" id="input-folder" placeholder="Папка поиска" spellcheck="false">
-      <button id="btn-folder">Обзор…</button>
-    </div>
-    <input type="search" id="input-filter" placeholder="Фильтр по таблице…">
-    <button id="btn-select-all">Выделить все</button>
-    <span id="selected-count" class="muted">Выбрано: 0</span>
-  </section>
 
   <main class="grid-wrap">
     <table id="grid">
+      <colgroup>
+        <col class="c-check"><col class="c-code"><col class="c-rev"><col class="c-date">
+        <col class="c-name"><col class="c-path"><col class="c-status"><col class="c-size"><col class="c-mtime">
+      </colgroup>
       <thead>
         <tr>
           <th class="col-check"><input type="checkbox" id="chk-all" title="Выделить все"></th>
-          <th data-sort="doc_code">Шифр документа</th>
-          <th data-sort="revision">Изм.</th>
-          <th data-sort="revision_date">Дата изменения</th>
-          <th data-sort="filename">Имя файла</th>
-          <th data-sort="path" class="col-path">Путь</th>
-          <th data-sort="status">Статус</th>
-          <th data-sort="size">Размер</th>
-          <th data-sort="file_mtime">Дата файла</th>
+          <th data-sort="doc_code" title="Шифр документа">Шифр документа</th>
+          <th data-sort="revision" title="Номер изменения">Изм.</th>
+          <th data-sort="revision_date" title="Дата изменения">Дата изменения</th>
+          <th data-sort="filename" title="Имя файла">Имя файла</th>
+          <th data-sort="path" class="col-path" title="Папка файла">Путь</th>
+          <th data-sort="status" title="Статус">Статус</th>
+          <th data-sort="size" title="Размер файла">Размер</th>
+          <th data-sort="file_mtime" title="Дата файла на диске">Дата файла</th>
         </tr>
       </thead>
       <tbody id="grid-body"></tbody>
     </table>
     <div id="empty" class="empty" hidden>Файлов пока нет. Нажмите «Поиск» или «Добавить файл».</div>
   </main>
+
+  <footer class="footer">
+    <span id="selected-count" class="count" title="Выбрано файлов">0</span>
+    <span id="status-text" class="status-text">Готово</span>
+    <progress id="progress" max="100" value="0" hidden></progress>
+  </footer>
+
+  <div id="settings-popup" class="popup" hidden>
+    <div class="popup-body">
+      <div class="popup-title settings-title">Настройки: папки поиска</div>
+      <ul id="dirs-list" class="dirs-list"></ul>
+      <div id="dirs-empty" class="muted">Папок нет. Добавьте хотя бы одну.</div>
+      <label class="interval-row" title="Как часто повторять поиск при включённом фоновом режиме">
+        Периодичность фонового поиска, мин:
+        <input type="number" id="input-interval" min="1" max="1440" step="1" value="60">
+      </label>
+      <div class="popup-actions settings-actions">
+        <button id="btn-dir-add">Добавить папку…</button>
+        <button id="btn-clear-db" class="danger-btn" title="Удалить все записи о файлах и все CSV">Очистить базу данных</button>
+        <button id="settings-close" class="primary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="confirm-popup" class="popup" hidden>
+    <div class="popup-body small">
+      <div id="confirm-text" class="confirm-text"></div>
+      <div class="popup-actions">
+        <button id="confirm-no">Нет</button>
+        <button id="confirm-yes" class="primary">Да</button>
+      </div>
+    </div>
+  </div>
 
   <div id="error-popup" class="popup" hidden>
     <div class="popup-body">

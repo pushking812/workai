@@ -63,6 +63,53 @@ def test_add_files_and_stat(tmp_path):
     assert data["found"][0]["filename"] == "a.docx"
 
 
+def test_hide_and_restore(tmp_path):
+    ctl = _controller(tmp_path)
+    first = tmp_path / "a.docx"
+    first.write_bytes(b"abc")
+    ctl.add_files([str(first)])
+    file_id = ctl.get_files()["files"][0]["id"]
+    assert ctl.hide_files([file_id, 9999]) == {"status": "ok", "changed": 1}
+    assert ctl.get_files()["files"][0]["status"] == "HIDDEN"
+    assert ctl.hide_files([file_id])["changed"] == 0
+    assert ctl.restore_files([file_id])["changed"] == 1
+    assert ctl.get_files()["files"][0]["status"] == "SAVED"
+    assert ctl.restore_files([file_id])["changed"] == 0
+
+
+def test_clear_database_removes_records_and_csv(tmp_path):
+    ctl = _controller(tmp_path)
+    first = tmp_path / "a.docx"
+    first.write_bytes(b"abc")
+    ctl.add_files([str(first)])
+    file_id = ctl.get_files()["files"][0]["id"]
+    csv = tmp_path / "x.csv"
+    csv.write_text("a;b", encoding="utf-8")
+    from core import database
+
+    connection = database.init_db(ctl.db_path)
+    database.update_file_status(connection, file_id, "SAVED", csv_path=str(csv))
+    connection.close()
+    result = ctl.clear_database()
+    assert result["status"] == "ok"
+    assert result["records"] == 1
+    assert result["csv_deleted"] == 1
+    assert not csv.exists()
+    assert ctl.get_files() == {"files": [], "found": []}
+
+
+def test_api_new_methods_delegate(monkeypatch):
+    calls = []
+    monkeypatch.setattr(controller, "hide_files", lambda ids: calls.append(("hide", ids)) or {})
+    monkeypatch.setattr(controller, "restore_files", lambda ids: calls.append(("restore", ids)) or {})
+    monkeypatch.setattr(controller, "clear_database", lambda: calls.append("clear") or {})
+    api = Api()
+    api.hide_files([1])
+    api.restore_files([2])
+    api.clear_database()
+    assert calls == [("hide", [1]), ("restore", [2]), "clear"]
+
+
 def test_ui_files_exist():
     for name in ("index.html", os.path.join("css", "style.css"), os.path.join("js", "app.js")):
         assert os.path.isfile(os.path.join(UI_DIR, name))

@@ -15,6 +15,8 @@ import sys
 
 WINDOW_TITLE = "БД Строительных Документов"
 WINDOW_SIZE = (1200, 800)
+# Меньше окно не делаем: в одной строке шапки должны помещаться все элементы.
+MIN_SIZE = (1000, 500)
 UI_INDEX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui", "index.html")
 
 
@@ -30,7 +32,7 @@ def run_gui() -> int:
         width=WINDOW_SIZE[0],
         height=WINDOW_SIZE[1],
         resizable=True,
-        min_size=(900, 500),
+        min_size=MIN_SIZE,
     )
     webview.start()
     return 0

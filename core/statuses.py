@@ -15,6 +15,7 @@ class FileStatus(str, Enum):
     NEEDS_MAPPING = "NEEDS_MAPPING"
     READY = "READY"
     ERROR = "ERROR"
+    HIDDEN = "HIDDEN"
 
 
 class UiStatus(str, Enum):

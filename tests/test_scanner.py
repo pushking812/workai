@@ -58,5 +58,7 @@ def test_is_generator_and_stop(tmp_path):
 
 def test_statuses():
     assert is_db_status("READY") and not is_db_status("FOUND")
-    assert {s.value for s in FileStatus} == {"SAVED", "PROCESSING", "NEEDS_MAPPING", "READY", "ERROR"}
+    assert {s.value for s in FileStatus} == {
+        "SAVED", "PROCESSING", "NEEDS_MAPPING", "READY", "ERROR", "HIDDEN",
+    }
     assert UiStatus.FOUND.value == "FOUND"

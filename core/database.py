@@ -127,6 +127,17 @@ def get_current_by_path(connection: sqlite3.Connection, path: str) -> dict[str, 
     return row_to_dict(cursor.fetchone())
 
 
+def get_by_hash_and_path(
+    connection: sqlite3.Connection, file_hash: str, path: str
+) -> dict[str, Any] | None:
+    """Запись с точно такими же хэшем и путём (ограничение UNIQUE(hash, path))."""
+    cursor = connection.execute(
+        "SELECT * FROM files WHERE hash = ? AND path = ? ORDER BY id DESC LIMIT 1",
+        (file_hash, path),
+    )
+    return row_to_dict(cursor.fetchone())
+
+
 def get_by_variant_group(connection: sqlite3.Connection, variant_group: str) -> list[dict[str, Any]]:
     """Все записи с одинаковыми реквизитами штампа (шифр, изм., дата)."""
     cursor = connection.execute(

@@ -85,6 +85,15 @@ def test_scenario_already_exists(tmp_path, connection):
     assert len(database.list_files(connection)) == 1
 
 
+def test_same_file_with_changed_stamp_is_not_inserted_twice(tmp_path, connection):
+    """Парсер дал другие реквизиты для того же файла — IntegrityError быть не должно."""
+    path = make_file(tmp_path, "a.docx", b"v0")
+    process_file_entry(path, connection, stamp=stamp("0", "2025-08-01"))
+    result = process_file_entry(path, connection, stamp=stamp("1", "2026-02-06"))
+    assert result["result"] == RESULT_ALREADY_EXISTS
+    assert len(database.list_files(connection)) == 1
+
+
 def test_already_exists_for_copy_in_other_folder(tmp_path, connection):
     other = tmp_path / "other"
     other.mkdir()

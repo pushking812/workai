@@ -85,6 +85,20 @@ def process_file_entry(
         "file_id": None,
     }
 
+    # Тот же файл по тому же пути уже в БД (даже если реквизиты штампа
+    # при повторном разборе вышли другими) — дубль не создаём.
+    same_file = database.get_by_hash_and_path(connection, file_hash, abs_path)
+    if same_file:
+        result.update(
+            {
+                "result": RESULT_ALREADY_EXISTS,
+                "file_id": same_file["id"],
+                "variant_group": same_file.get("variant_group"),
+                "is_current": same_file.get("is_current", 1),
+            }
+        )
+        return result
+
     # Без шифра документ нельзя сопоставить с другими — храним отдельной
     # записью, но повторный прогон того же файла дубля не создаёт.
     if not doc_code:

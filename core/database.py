@@ -13,11 +13,13 @@ import sqlite3
 from typing import Any, Iterable
 
 DB_PATH = os.path.join("data", "app.db")
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 # Версия схемы, в которой справочник синонимов заполняется базовым набором.
 SYNONYMS_SEED_VERSION = 3
 # Версия, добавившая ФормулаРасчета и NЛСР и убравшая «примечание» из ссылки.
 SYNONYMS_V4_VERSION = 4
+# Версия, добавившая канонические имена КЖ (KZH_SYNONYMS).
+SYNONYMS_V5_VERSION = 5
 
 CREATE_FILES_TABLE = """
 CREATE TABLE IF NOT EXISTS files (
@@ -92,6 +94,30 @@ SEED_SYNONYMS: dict[str, tuple[str, ...]] = {
         "расчет объемов работ",
     ),
     "NЛСР": ("№ в лср", "№ лср", "номер в лср", "n в лср"),
+}
+
+# Колонки КЖ (кабельный журнал), версия 5. Канонические имена — иерархические
+# заголовки так, как их отдаёт парсер (kzh_heaaders.xlsx + «Участок трассы кабеля»).
+# Блок «Проложен» не выгружается, поэтому в справочнике его нет. Короткие
+# варианты (`ПоПроекту|Марка`) дают профили cable_section/pipes — это та же колонка.
+KZH_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "ОбозначениеКабеляПро": ("обозначение кабеля, провода", "обозначение кабеля"),
+    "Трасса|Начало": ("трасса начало",),
+    "Трасса|Конец": ("трасса конец",),
+    "КабельПровод|ПоПроекту|Марка": (
+        "кабель, провод|по проекту|марка",
+        "по проекту|марка",
+    ),
+    "КабельПровод|ПоПроекту|КолЧислоИСечЖил": (
+        "кабель, провод|по проекту|кол, число и сечение жил",
+        "по проекту|кол, число и сечение жил",
+        "ПоПроекту|КолЧислоИСечЖил",
+    ),
+    "КабельПровод|ПоПроекту|ДлинаМ": (
+        "кабель, провод|по проекту|длина, м",
+        "по проекту|длина, м",
+    ),
+    "УчастокТрассыКаб": ("участок трассы кабеля",),
 }
 
 # Что миграция на версию 4 вносит в уже существующие БД версии 3.
@@ -178,9 +204,19 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
     # чтобы удалённые пользователем синонимы не возвращались.
     if previous_version < SYNONYMS_SEED_VERSION:
         seed_dictionary(connection)
-    elif previous_version < SYNONYMS_V4_VERSION:
-        migrate_synonyms_v4(connection)
+    else:
+        if previous_version < SYNONYMS_V4_VERSION:
+            migrate_synonyms_v4(connection)
+        if previous_version < SYNONYMS_V5_VERSION:
+            migrate_synonyms_v5(connection)
     return connection
+
+
+def migrate_synonyms_v5(connection: sqlite3.Connection) -> None:
+    """БД версии 4 -> 5: канонические имена КЖ. Существующие записи не меняются."""
+    for canonical, synonyms in KZH_SYNONYMS.items():
+        for synonym in (canonical, *synonyms):
+            add_synonym(connection, canonical, synonym, 1.0)
 
 
 def migrate_synonyms_v4(connection: sqlite3.Connection) -> None:
@@ -416,7 +452,7 @@ def seed_dictionary(connection: sqlite3.Connection) -> int:
     Идемпотентна и ничего не перезаписывает: ручные синонимы сохраняются.
     """
     added = 0
-    for canonical, synonyms in SEED_SYNONYMS.items():
+    for canonical, synonyms in {**SEED_SYNONYMS, **KZH_SYNONYMS}.items():
         for synonym in (canonical, *synonyms):
             added += add_synonym(connection, canonical, synonym, 1.0)
     return added

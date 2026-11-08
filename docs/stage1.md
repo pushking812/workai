@@ -37,6 +37,9 @@ python convert_doc.py КЖ СО        # .doc -> .docx, разбор штамп�
 | `scripts/process_folder.py` | сквозной прогон папки |
 | `convert_doc.py` | массовый прогон папок с записью в xlsx |
 
+Поиск файлов в потоках и API для GUI — в `docs/stage3.md`. Статусы файлов
+(`SAVED`, `ERROR` и др.) теперь берутся из `core/statuses.py`.
+
 ## Версии документов
 
 Документ определяется штампом, а не путём: `doc_code` + `revision` +

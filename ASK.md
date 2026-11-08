@@ -45,6 +45,8 @@
 
 - `main.py <папка>`: прогресс в stderr, итог в stdout, отчёт по штампам в `data/exports/_report_<папка>.tsv` (`--verbose` печатает его в консоль). `process_file_entry` сначала ищет запись по (hash, path) → `ALREADY_EXISTS`. `stamp_raw` хранит схлопнутые таблицы (`_collapse_table`). 72 теста.
 
+- Этап 3 (бэкенд) закончен: `core/statuses.py`, `core/search/` (scanner, manager, registrar, tasks), `api/controller.py`, CoInitialize для .doc в потоках; 148 тестов. Описание — `docs/stage3.md`. Shell у run_command — cmd.
+
 ## Устройство `stamp_parser.py` (кратко)
 - `STAMP_CELLS` (строки 51–64), `SHIFT` (98–106), `CHANGE_LABEL_ROW=8`.
 - `read_table_rows` разворачивает gridSpan/vMerge в сетку; `find_change_label_row` ищет строку подписей изменений (≥4 подписей); `anchored_cell` перебирает `_row_candidates`.

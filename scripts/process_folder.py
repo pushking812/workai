@@ -63,7 +63,9 @@ def export_tables(
             analyze_and_save_schema(connection, parsed.headers, file_hash)
             schema_done = True
         target = os.path.join(exports_dir, "%s_table_%d.csv" % (file_hash[:16], index))
-        paths.append(save_table_to_csv(parsed.rows, target, headers=parsed.headers))
+        # Таблица-продолжение без шапки: пустую строку заголовков не пишем.
+        csv_headers = parsed.headers if any(parsed.headers) else None
+        paths.append(save_table_to_csv(parsed.rows, target, headers=csv_headers))
     return ";".join(paths)
 
 

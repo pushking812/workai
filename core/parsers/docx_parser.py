@@ -119,7 +119,16 @@ def _is_data_row(row: list[str]) -> bool:
     """Строка данных: первая заполненная ячейка — номер позиции («1», «2.»)."""
     for cell in row:
         if cell:
-            return cell.strip().rstrip(".").isdigit()
+            return cell.strip().rstrip(".)").isdigit()
+    return False
+
+
+def _next_is_data(table: list[list[str]], index: int, width: int) -> bool:
+    """Следующая непустая строка после `index` — строка данных."""
+    for row in table[index + 1:index + 4]:
+        padded = list(row) + [""] * (width - len(row))
+        if not _is_empty_row(padded):
+            return _is_data_row(padded)
     return False
 
 
@@ -180,11 +189,16 @@ def scan_headers(table: list[list[str]]) -> HeaderScan:
         if is_numbering_row(normalised, width):
             data_start = index + 1
             break
-        if any(levels) and _is_data_row(normalised):
+        if _is_data_row(normalised):
+            # Без уровней это таблица-продолжение (разрыв страницы): шапки нет.
+            if not any(levels):
+                data_start = index
             break
         if _is_banner_row(normalised):
             continue
         if _is_group_row(normalised):
+            if any(levels) and _next_is_data(table, index, width):
+                break  # группа раздела данных, а не префикс подзаголовков
             group_prefix = normalised[[i for i, c in enumerate(normalised) if c][0]]
             continue
         for column, cell in enumerate(normalised):

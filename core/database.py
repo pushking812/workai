@@ -13,9 +13,11 @@ import sqlite3
 from typing import Any, Iterable
 
 DB_PATH = os.path.join("data", "app.db")
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 # Версия схемы, в которой справочник синонимов заполняется базовым набором.
 SYNONYMS_SEED_VERSION = 3
+# Версия, добавившая ФормулаРасчета и NЛСР и убравшая «примечание» из ссылки.
+SYNONYMS_V4_VERSION = 4
 
 CREATE_FILES_TABLE = """
 CREATE TABLE IF NOT EXISTS files (
@@ -82,9 +84,22 @@ SEED_SYNONYMS: dict[str, tuple[str, ...]] = {
         "ссылка",
         "ссылка на чертежи",
         "ссылка на чертежи, спецификации",
-        "примечание",
     ),
+    # Добавлено в версии 4 (колонки ВОР, не находившиеся в справочнике).
+    "ФормулаРасчета": (
+        "формула расчета",
+        "формула расчета, расчет объемов работ и расхода материалов",
+        "расчет объемов работ",
+    ),
+    "NЛСР": ("№ в лср", "№ лср", "номер в лср", "n в лср"),
 }
+
+# Что миграция на версию 4 вносит в уже существующие БД версии 3.
+V4_NEW_SYNONYMS: dict[str, tuple[str, ...]] = {
+    name: SEED_SYNONYMS[name] for name in ("ФормулаРасчета", "NЛСР")
+}
+# «Примечание» относили к ссылке на чертежи по ошибке — убираем.
+V4_REMOVED_SYNONYMS: tuple[tuple[str, str], ...] = (("СсылкаНаЧерСпе", "примечание"),)
 
 CREATE_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_files_schema_hash ON files(schema_hash)",
@@ -163,7 +178,26 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
     # чтобы удалённые пользователем синонимы не возвращались.
     if previous_version < SYNONYMS_SEED_VERSION:
         seed_dictionary(connection)
+    elif previous_version < SYNONYMS_V4_VERSION:
+        migrate_synonyms_v4(connection)
     return connection
+
+
+def migrate_synonyms_v4(connection: sqlite3.Connection) -> None:
+    """БД версии 3 -> 4: новые канонические имена и удаление «примечание».
+
+    Удаляется только запись, которая всё ещё указывает на СсылкаНаЧерСпе:
+    если пользователь перенёс синоним на другое имя, он остаётся.
+    """
+    for canonical, synonyms in V4_NEW_SYNONYMS.items():
+        for synonym in (canonical, *synonyms):
+            add_synonym(connection, canonical, synonym, 1.0)
+    for canonical, synonym in V4_REMOVED_SYNONYMS:
+        connection.execute(
+            "DELETE FROM header_synonyms WHERE canonical_name = ? AND synonym_normalized = ?",
+            (canonical, synonym_key(synonym)),
+        )
+    connection.commit()
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:

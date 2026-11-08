@@ -3,3 +3,4 @@ lxml
 openpyxl
 pytest
 pywin32; sys_platform == "win32"
+rapidfuzz

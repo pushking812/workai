@@ -20,6 +20,7 @@ from core.doc_converter import is_doc_file, read_doc_stamp_source
 from core.hasher import process_file_entry
 from core.parsers.docx_parser import extract_tables_from_docx, save_table_to_csv
 from core.parsers.header_profiles import parse_table
+from core.parsers.numbering_fix import numbering_fixed
 from core.parsers.stamp_parser import parse_stamp
 from core.transformer.schema_analyzer import analyze_and_save_schema
 
@@ -52,7 +53,8 @@ def export_tables(
     paths: list[str] = []
     schema_done = False
     try:
-        tables = extract_tables_from_docx(source_path)
+        with numbering_fixed(source_path) as readable_path:
+            tables = extract_tables_from_docx(readable_path)
     except Exception:  # noqa: BLE001
         return ""
     for index, table in enumerate(tables, start=1):

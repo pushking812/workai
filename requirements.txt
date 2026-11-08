@@ -2,5 +2,6 @@ docx2python
 lxml
 openpyxl
 pytest
+python-docx
 pywin32; sys_platform == "win32"
 rapidfuzz

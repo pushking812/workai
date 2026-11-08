@@ -5,6 +5,7 @@ import re
 import argparse
 import zipfile
 import shutil
+import tempfile
 from lxml import etree
 from docx import Document
 
@@ -100,7 +101,7 @@ def format_number(num_fmt, value):
 # ============================================================
 # 3. ОБРАБОТКА ОДНОГО ФАЙЛА
 # ============================================================
-def process_file(input_path, output_path):
+def process_file(input_path, output_path, verbose=True):
     """
     Обрабатывает один docx:
       1) распаковывает для чтения numbering.xml,
@@ -109,19 +110,21 @@ def process_file(input_path, output_path):
       4) сохраняет.
     """
     # --- 1. Распаковка ради word/numbering.xml ---
-    temp_dir = 'temp_docx_unpacked'
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
-    os.makedirs(temp_dir, exist_ok=True)
     with zipfile.ZipFile(input_path, 'r') as z:
-        z.extractall(temp_dir)
+        if 'word/numbering.xml' not in z.namelist():
+            if verbose:
+                print(f'[!] В файле {input_path} нет numbering.xml — пропускаем.')
+            return None
+        numbering_bytes = z.read('word/numbering.xml')
 
-    numbering_path = os.path.join(temp_dir, 'word', 'numbering.xml')
-    if not os.path.exists(numbering_path):
-        print(f'[!] В файле {input_path} нет numbering.xml — пропускаем.')
-        return
-
-    num_map = parse_numbering(numbering_path)
+    temp_dir = tempfile.mkdtemp(prefix='docx_num_')
+    try:
+        numbering_path = os.path.join(temp_dir, 'numbering.xml')
+        with open(numbering_path, 'wb') as fh:
+            fh.write(numbering_bytes)
+        num_map = parse_numbering(numbering_path)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
     # --- 2. Один экземпляр Document ---
     doc = Document(input_path)
@@ -238,13 +241,16 @@ def process_file(input_path, output_path):
     # --- 4. Сохраняем ---
     doc.save(output_path)
 
-    print(f'[+] Готово: {output_path} '
-          f'(изменено параграфов: {modified}, пропущено без определения: {skipped_no_def})')
+    if verbose:
+        print(f'[+] Готово: {output_path} '
+              f'(изменено параграфов: {modified}, пропущено без определения: {skipped_no_def})')
 
-    if modified == 0:
+    if modified == 0 and verbose:
         print('[!] ВНИМАНИЕ: ни один параграф с numPr не найден.')
         print('    Возможно, нумерация задана через стиль (w:pStyle → styles.xml),')
         print('    а не напрямую в параграфе.')
+
+    return modified
 
 
 # ============================================================
@@ -339,7 +345,7 @@ def main():
         try:
             process_file(f, out)
 
-            if args.in_place:
+            if args.in_place and os.path.exists(out):
                 # Резервная копия только если её ещё нет
                 backup = f + '.bak'
                 if not os.path.exists(backup):

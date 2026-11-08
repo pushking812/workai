@@ -47,6 +47,28 @@ def test_add_synonym_manual_not_overwritten_by_seed(tmp_path):
     assert db.get_canonical_for_synonym(con, "марка кабеля") == "Марка"
 
 
+def test_deleted_seed_synonym_not_restored_on_reinit(tmp_path):
+    path = str(tmp_path / "t.db")
+    con = db.init_db(path)
+    con.execute("DELETE FROM header_synonyms WHERE synonym_normalized = ?", (db.synonym_key("№"),))
+    con.commit()
+    con.close()
+    con = db.init_db(path)
+    assert db.get_canonical_for_synonym(con, "№") is None
+    assert db.get_canonical_for_synonym(con, "Ед. изм.") == "ЕдИзм"
+
+
+def test_old_db_version_gets_seeded(tmp_path):
+    path = str(tmp_path / "old.db")
+    con = db.init_db(path)
+    con.execute("DELETE FROM header_synonyms")
+    con.execute("PRAGMA user_version = 2")
+    con.commit()
+    con.close()
+    con = db.init_db(path)
+    assert db.get_canonical_for_synonym(con, "Количество") == "КолВо"
+
+
 def test_seed_synonyms_do_not_collide():
     seen: dict[str, str] = {}
     for canonical, synonyms in db.SEED_SYNONYMS.items():

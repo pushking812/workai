@@ -14,6 +14,8 @@ from typing import Any, Iterable
 
 DB_PATH = os.path.join("data", "app.db")
 SCHEMA_VERSION = 3
+# Версия схемы, в которой справочник синонимов заполняется базовым набором.
+SYNONYMS_SEED_VERSION = 3
 
 CREATE_FILES_TABLE = """
 CREATE TABLE IF NOT EXISTS files (
@@ -154,9 +156,13 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
         connection.execute("ALTER TABLE files ADD COLUMN schema_hash TEXT")
     for statement in CREATE_INDEXES:
         connection.execute(statement)
+    previous_version = connection.execute("PRAGMA user_version").fetchone()[0]
     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     connection.commit()
-    seed_dictionary(connection)
+    # Базовый справочник заполняется один раз — при миграции на версию 3,
+    # чтобы удалённые пользователем синонимы не возвращались.
+    if previous_version < SYNONYMS_SEED_VERSION:
+        seed_dictionary(connection)
     return connection
 
 

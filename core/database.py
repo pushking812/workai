@@ -13,7 +13,7 @@ import sqlite3
 from typing import Any, Iterable
 
 DB_PATH = os.path.join("data", "app.db")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 CREATE_FILES_TABLE = """
 CREATE TABLE IF NOT EXISTS files (
@@ -51,6 +51,38 @@ CREATE TABLE IF NOT EXISTS schemas (
     created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 """
+
+CREATE_SYNONYMS_TABLE = """
+CREATE TABLE IF NOT EXISTS header_synonyms (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_name      TEXT NOT NULL,
+    synonym_normalized  TEXT NOT NULL UNIQUE,
+    confidence_score    REAL NOT NULL DEFAULT 1.0
+)
+"""
+
+# Базовый справочник (ТЗ Этапа 2, п. 2.2): каноническое имя -> синонимы в
+# «человеческом» виде. При записи они приводятся к `normalize_header(...).casefold()`,
+# так что «ед изм» и «Ед. изм.» дают один ключ `едизм`. Каноническое имя
+# синонимом самого себя добавляется автоматически.
+SEED_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "NПП": ("nпп", "n п/п", "№ п/п", "номер", "n", "№"),
+    "НаименованиеРабот": (
+        "наименование работ",
+        "наименование",
+        "описание",
+        "описание работ",
+        "вид работ",
+    ),
+    "ЕдИзм": ("ед изм", "единица измерения", "ед", "единица"),
+    "КолВо": ("кол во", "количество", "объем", "обьем"),
+    "СсылкаНаЧерСпе": (
+        "ссылка",
+        "ссылка на чертежи",
+        "ссылка на чертежи, спецификации",
+        "примечание",
+    ),
+}
 
 CREATE_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_files_schema_hash ON files(schema_hash)",
@@ -115,6 +147,7 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
     connection = get_connection(db_path)
     connection.execute(CREATE_FILES_TABLE)
     connection.execute(CREATE_SCHEMAS_TABLE)
+    connection.execute(CREATE_SYNONYMS_TABLE)
     # БД, созданные до Этапа 2, могут не иметь колонки schema_hash.
     existing = {row["name"] for row in connection.execute("PRAGMA table_info(files)")}
     if "schema_hash" not in existing:
@@ -123,6 +156,7 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
         connection.execute(statement)
     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     connection.commit()
+    seed_dictionary(connection)
     return connection
 
 
@@ -295,6 +329,64 @@ def set_file_schema_hash(
         "UPDATE files SET schema_hash = ? WHERE id = ?", (schema_hash, file_id)
     )
     connection.commit()
+
+
+def synonym_key(text: object) -> str:
+    """Ключ поиска в справочнике: `normalize_header(text).casefold()`."""
+    from core.transformer.schema_analyzer import normalize_header
+
+    return normalize_header(text).casefold()
+
+
+def add_synonym(
+    connection: sqlite3.Connection,
+    canonical_name: str,
+    synonym: str,
+    confidence: float = 1.0,
+) -> bool:
+    """Добавляет синоним (любой текст, нормализуется сам).
+
+    Существующий синоним не меняется: возвращает False, если ключ уже занят.
+    """
+    key = synonym_key(synonym)
+    if not key:
+        return False
+    cursor = connection.execute(
+        "INSERT OR IGNORE INTO header_synonyms "
+        "(canonical_name, synonym_normalized, confidence_score) VALUES (?, ?, ?)",
+        (canonical_name, key, confidence),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def seed_dictionary(connection: sqlite3.Connection) -> int:
+    """Заполняет справочник базовыми значениями. Возвращает число новых записей.
+
+    Идемпотентна и ничего не перезаписывает: ручные синонимы сохраняются.
+    """
+    added = 0
+    for canonical, synonyms in SEED_SYNONYMS.items():
+        for synonym in (canonical, *synonyms):
+            added += add_synonym(connection, canonical, synonym, 1.0)
+    return added
+
+
+def get_canonical_for_synonym(
+    connection: sqlite3.Connection, normalized_header: str
+) -> str | None:
+    """Каноническое имя для заголовка или None, если его нет в справочнике.
+
+    Принимает как уже нормализованный заголовок, так и сырой текст.
+    """
+    key = synonym_key(normalized_header)
+    if not key:
+        return None
+    row = connection.execute(
+        "SELECT canonical_name FROM header_synonyms WHERE synonym_normalized = ?",
+        (key,),
+    ).fetchone()
+    return row["canonical_name"] if row else None
 
 
 def get_files_by_schema(connection: sqlite3.Connection, schema_hash: str) -> list[dict[str, Any]]:

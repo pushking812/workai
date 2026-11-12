@@ -29,6 +29,43 @@ def test_apt_numbers_match_word():
     assert os.path.getsize(APT) == before
 
 
+def _svor_es2():
+    folder = "СВОР"
+    if not os.path.isdir(folder):
+        return None
+    for name in os.listdir(folder):
+        if name.startswith("28_") and "ЭС2.СВОР" in name and name.endswith(".docx"):
+            return os.path.join(folder, name)
+    return None
+
+
+@pytest.mark.skipif(_svor_es2() is None, reason="нет файла СВОР ЭС2")
+def test_style_numbering_is_materialised():
+    """Нумерация задана стилем абзаца (pStyle -> styles.xml), а не прямым numPr."""
+    path = _svor_es2()
+    with numbering_fixed(path) as fixed:
+        assert fixed != path
+        flat = [c for t in _first_cells(fixed) for c in t]
+    numbers = [int(c) for c in flat if c.isdigit()]
+    assert 54 in numbers and 30 in numbers
+
+
+def test_style_numbering_unit():
+    from scripts.docx_fix_numbering import parse_style_numbering
+
+    styles = (
+        '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:style w:type="paragraph" w:styleId="A"><w:pPr><w:numPr><w:numId w:val="5"/></w:numPr></w:pPr></w:style>'
+        '<w:style w:type="paragraph" w:styleId="B"><w:basedOn w:val="A"/>'
+        '<w:pPr><w:numPr><w:ilvl w:val="1"/></w:numPr></w:pPr></w:style>'
+        '<w:style w:type="paragraph" w:styleId="C"/></w:styles>'
+    ).encode()
+    result = parse_style_numbering(styles)
+    assert result["A"] == ("5", None)
+    assert result["B"] == ("5", "1")
+    assert "C" not in result
+
+
 def test_file_without_numbering_returns_source(tmp_path):
     from docx import Document
 

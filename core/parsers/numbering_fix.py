@@ -2,7 +2,7 @@
 
 `docx2python` сам считает номера списков и ошибается (сбрасывает счётчик,
 подставляет `)`), поэтому перед разбором таблиц документ прогоняется через
-`docx_fix_numbering.process_file`. Исходный файл не меняется.
+`scripts/docx_fix_numbering.process_file`. Исходный файл не меняется.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 def _fixer():
     if _ROOT not in sys.path:
         sys.path.insert(0, _ROOT)
-    import docx_fix_numbering
+    from scripts import docx_fix_numbering
 
     return docx_fix_numbering
 

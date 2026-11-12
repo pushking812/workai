@@ -1,15 +1,3 @@
-ВОР/
-Асташин/
-другое/
-*.patch
-*.xlsx
-temp_docx_unpacked/
-*.docx
-ЕСТ-ПМ-80825-Р-1-ИСВН (кн. 1_ кн. 2)_ВОР.docx
-ЕСТ-ПМ-80825-Р-1-ИСВН (кн. 1_ кн. 2)_ВОР.docx.bak
-after.csv
-before.csv
-
 # Этап 1: данные и служебное
 data/
 __pycache__/
@@ -19,12 +7,16 @@ __pycache__/
 
 # Исходные документы (Word) и их конвертация
 *.doc
-КЖ/
-СО/
+*.docx
+*.xlsx
+/КЖ/
+/СО/
+/ВОР/
 _conv/
-_conv*.docx
+РД/
 
 # Временные скрипты и выгрузки отладки
+temp_docx_unpacked/
 _dump_*.py
 _run_all.py
 _vor_*

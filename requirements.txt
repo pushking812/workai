@@ -3,6 +3,7 @@ lxml
 openpyxl
 pytest
 python-docx
+pyOpenVBA
 pywebview
 pywin32; sys_platform == "win32"
 rapidfuzz

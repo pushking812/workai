@@ -88,6 +88,43 @@ def parse_numbering(numbering_xml_path):
     return num_map
 
 
+def parse_style_numbering(styles_bytes):
+    """
+    Нумерация, заданная в стилях абзацев (styles.xml).
+    Возвращает {styleId: (numId | None, ilvl | None)} с учётом наследования
+    через w:basedOn (свои значения стиля важнее унаследованных).
+    """
+    root = etree.fromstring(styles_bytes)
+    raw = {}
+    for style in root.xpath('//w:style[@w:type="paragraph"]', namespaces=NS):
+        style_id = style.get(qn('styleId'))
+        based = style.xpath('./w:basedOn', namespaces=NS)
+        num_id_el = style.xpath('./w:pPr/w:numPr/w:numId', namespaces=NS)
+        ilvl_el = style.xpath('./w:pPr/w:numPr/w:ilvl', namespaces=NS)
+        raw[style_id] = (
+            based[0].get(qn('val')) if based else None,
+            num_id_el[0].get(qn('val')) if num_id_el else None,
+            ilvl_el[0].get(qn('val')) if ilvl_el else None,
+        )
+
+    resolved = {}
+    for style_id in raw:
+        num_id = ilvl = None
+        seen = set()
+        current = style_id
+        while current in raw and current not in seen:
+            seen.add(current)
+            parent, own_num, own_ilvl = raw[current]
+            if num_id is None and own_num is not None:
+                num_id = own_num
+            if ilvl is None and own_ilvl is not None:
+                ilvl = own_ilvl
+            current = parent
+        if num_id is not None or ilvl is not None:
+            resolved[style_id] = (num_id, ilvl)
+    return resolved
+
+
 # ============================================================
 # 2. ФОРМАТИРОВАНИЕ НОМЕРА
 # ============================================================
@@ -116,6 +153,7 @@ def process_file(input_path, output_path, verbose=True):
                 print(f'[!] В файле {input_path} нет numbering.xml — пропускаем.')
             return None
         numbering_bytes = z.read('word/numbering.xml')
+        styles_bytes = z.read('word/styles.xml') if 'word/styles.xml' in z.namelist() else None
 
     temp_dir = tempfile.mkdtemp(prefix='docx_num_')
     try:
@@ -137,24 +175,40 @@ def process_file(input_path, output_path, verbose=True):
     # Собираем параграфы в список заранее — мы будем менять их содержимое
     paragraphs = body.xpath('.//w:p')
 
+    style_numbering = parse_style_numbering(styles_bytes) if styles_bytes else {}
+
     for p in paragraphs:
         num_pr_list = p.xpath('./w:pPr/w:numPr')
-        if not num_pr_list:
-            continue
-        num_pr = num_pr_list[0]
+        num_id = ilvl = None
+        if num_pr_list:
+            num_id_el = num_pr_list[0].xpath('./w:numId')
+            ilvl_el = num_pr_list[0].xpath('./w:ilvl')
+            num_id = num_id_el[0].get(qn('val')) if num_id_el else None
+            ilvl = ilvl_el[0].get(qn('val')) if ilvl_el else None
 
-        num_id_el = num_pr.xpath('./w:numId')
-        ilvl_el = num_pr.xpath('./w:ilvl')
-        if not num_id_el:
+        # Нумерация из стиля абзаца: прямой numPr важнее, numId=0 отключает номер
+        from_style = False
+        if num_id is None:
+            style_el = p.xpath('./w:pPr/w:pStyle')
+            style_id = style_el[0].get(qn('val')) if style_el else None
+            if style_id in style_numbering:
+                style_num, style_ilvl = style_numbering[style_id]
+                if style_num is not None:
+                    num_id = style_num
+                    ilvl = ilvl if ilvl is not None else style_ilvl
+                    from_style = True
+        if num_id is None:
             continue
-        num_id = num_id_el[0].get(qn('val'))
-        ilvl = ilvl_el[0].get(qn('val')) if ilvl_el else '0'
+        if ilvl is None:
+            ilvl = '0'
 
         if num_id not in num_map or ilvl not in num_map[num_id]['levels']:
             skipped_no_def += 1
             continue
 
         level_def = num_map[num_id]['levels'][ilvl]
+        if from_style and level_def['numFmt'] == 'bullet':
+            continue  # маркер списка, не номер
         key = (num_id, ilvl)
 
         if key not in counters:

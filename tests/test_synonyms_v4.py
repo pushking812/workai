@@ -26,7 +26,8 @@ def test_migration_v3_to_v4(tmp_path):
     con.close()
     con = db.init_db(path)
     assert db.get_canonical_for_synonym(con, "№ в ЛСР") == "NЛСР"
-    assert db.get_canonical_for_synonym(con, "Примечание") is None
+    # из ссылки на чертежи «примечание» убрано; с версии 8 это роль СО «Примечание»
+    assert db.get_canonical_for_synonym(con, "Примечание") == "Примечание"
     assert db.get_canonical_for_synonym(con, "Моя колонка") == "МойСтолбец"
     assert con.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
 

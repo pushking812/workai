@@ -281,14 +281,18 @@ def test_compare_with_filename_reports_not_fixes() -> None:
 def test_real_documents_discrepancies() -> None:
     xk = os.path.join(VOR_DIR, "13_ЕСТ-ПМ-80825-Р-1-ЭК.ВОР__Изм.X от 2026.03.11 (поз.4).docx")
     stamp = parse_stamp(_require(xk))
-    assert stamp["revision_date"] == "2025-08-15"
+    # дата в имени новее штампа (2025-08-15) и становится датой изменения
+    assert stamp["revision_date"] == "2026-03-11"
+    assert stamp["revision_date_source"] == "filename"
     assert [item["field"] for item in stamp["discrepancies"]] == ["revision_date"]
+    assert stamp["discrepancies"][0]["stamp"] == "2025-08-15"
     assert stamp["discrepancies"][0]["filename"] == "2026-03-11"
 
     es1 = os.path.join(VOR_DIR, "ЕСТ-ПМ-80825-Р-1-ЭС1_ВОР Изм.2 от 17.06.26.docx")
     stamp = parse_stamp(_require(es1))
     assert stamp["revision"] == "2"
-    assert stamp["revision_date"] == "2026-10-15"
+    assert stamp["revision_date"] == "2026-10-15"  # штамп новее имени
+    assert stamp["revision_date_source"] == "stamp"
     assert [item["field"] for item in stamp["discrepancies"]] == ["revision_date"]
 
     matching = os.path.join(VOR_DIR, "13_ЕСТ-ПМ-80825-Р-1-ЭК.ВОР__Изм.1 от 2025.08.15.docx")

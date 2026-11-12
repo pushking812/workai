@@ -31,6 +31,14 @@ def test_clean_cell_text_newlines_tabs_and_spaces():
     assert clean_cell_text("  а\r\nб\t\tв   г д  ") == "а б в г д"
 
 
+def test_clean_cell_text_drops_list_marker():
+    assert clean_cell_text("--\t18.1") == "18.1"
+    assert clean_cell_text("-- 18.") == "18."
+    assert clean_cell_text("--") == ""
+    assert clean_cell_text(["--\tа", "--\tб"]) == "а б"
+    assert clean_cell_text("Замена на ГР--10.02") == "Замена на ГР--10.02"
+
+
 def test_clean_cell_text_none_and_empty():
     assert clean_cell_text(None) == ""
     assert clean_cell_text(["", [""]]) == ""
@@ -77,15 +85,29 @@ def test_extract_headers_multiline_header():
     assert start == 2
 
 
-def test_extract_headers_group_row_prefix():
+def test_extract_headers_group_row_is_not_a_prefix():
+    """Строка-группа до шапки пропускается и в имена колонок не попадает."""
     table = [
         ["", "Оборудование", ""],
         ["№", "Тип", "Кол-во"],
         ["1", "Камера", "4"],
     ]
     headers, start = extract_headers(table)
-    assert headers[1:] == ["Оборудование Тип", "Оборудование Кол-во"]
+    assert headers == ["№", "Тип", "Кол-во"]
     assert start == 2
+
+
+def test_extract_headers_section_row_after_header_starts_data():
+    """«1. Оборудование автоматики» под шапкой — раздел данных, не префикс."""
+    table = [
+        ["Поз.", "Наименование", "Кол-во"],
+        ["", "", ""],
+        ["", "1. Оборудование автоматики", ""],
+        ["", "1.1 Щиток", "2"],
+    ]
+    headers, start = extract_headers(table)
+    assert headers == ["Поз.", "Наименование", "Кол-во"]
+    assert start == 1
 
 
 def test_extract_headers_three_level_merged_header():

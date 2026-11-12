@@ -80,6 +80,7 @@ def process_file_entry(
         "doc_code": doc_code,
         "revision": revision,
         "revision_date": revision_date,
+        "revision_date_source": stamp.get("revision_date_source") or "",
         "variant_group": None,
         "is_current": 1,
         "file_id": None,

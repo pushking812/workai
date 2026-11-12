@@ -33,6 +33,9 @@ from typing import Any
 
 from lxml import etree
 
+from core.doc_types import UNKNOWN as UNKNOWN_DOC_TYPE
+from core.doc_types import doc_type_from_name, normalize_doc_type
+
 # Коды реквизитов штампа (они же ключи в stamp_raw["values"]).
 LABEL_DOC_CODE = "шифр"
 LABEL_REVISION = "изм"
@@ -230,6 +233,15 @@ def find_dates_in_filename(filename: str) -> list[str]:
         if 1 <= int(month) <= 12:
             found.append(year + "-" + month.zfill(2))
     return sorted(set(found))
+
+
+def newest_filename_date(filename: str) -> str | None:
+    """Самая поздняя дата из имени файла в виде `YYYY-MM-DD`.
+
+    Дата без дня (`2026.04`) считается первым числом месяца.
+    """
+    dates = [d if len(d) == 10 else d + "-01" for d in find_dates_in_filename(filename)]
+    return max(dates) if dates else None
 
 
 def find_revision_in_filename(filename: str) -> str:
@@ -758,6 +770,38 @@ def _revision_value(value: str) -> str:
     return text
 
 
+_CHANGE_NUMBER_RE = re.compile(r"^[0-9]{1,2}$")
+# Сколько строк вверх от подписей просматривается в поисках граф изменений.
+_MAX_CHANGE_ROWS = 12
+
+
+def latest_change_row(rows: list[list[str]]) -> int:
+    """Индекс строки последнего изменения в штампе (`-1`, если граф нет).
+
+    Графы изменений стоят над строкой подписей `Изм. | Кол.уч | ...`: первое
+    изменение — сразу над ней, каждое следующее — строкой выше. Поэтому от
+    подписей идём вверх, пока в графе `Изм.` стоит номер, и берём самый
+    верхний. Пустые строки пропускаются (заготовки), любой другой текст
+    (должность исполнителя, наименование) останавливает просмотр.
+    """
+    anchor = find_change_label_row(rows)
+    if anchor < 0:
+        return -1
+    best_index = -1
+    best_number = -1
+    first = max(anchor - _MAX_CHANGE_ROWS, 0)
+    for index in range(anchor - 1, first - 1, -1):
+        value = _row_value(rows, index, 1)
+        if value in ("", "-", "—", "–"):
+            continue
+        if not _CHANGE_NUMBER_RE.match(value):
+            break
+        number = int(value)
+        if number > best_number:
+            best_index, best_number = index, number
+    return best_index
+
+
 def _column_shift(rows: list[list[str]]) -> int:
     """Насколько сетка бланка сдвинута по столбцам относительно описания.
 
@@ -782,7 +826,12 @@ def read_revision_date(rows: list[list[str]]) -> str:
     row_number, column_number = STAMP_CELLS[LABEL_DATE]
     if 1 < column_number <= _SHIFTABLE_COLUMNS:
         column_number += _column_shift(rows)
-    candidates = [anchored_cell(rows, row_number, column_number)]
+    candidates = []
+    latest = latest_change_row(rows)
+    if latest >= 0:
+        # Дата последнего изменения — в той же строке, что и его номер.
+        candidates.append(_row_value(rows, latest, column_number))
+    candidates.append(anchored_cell(rows, row_number, column_number))
     anchor = find_change_label_row(rows)
     for offset in (1, 2, 3, 4):
         candidates.append(_row_value(rows, anchor - offset, column_number))
@@ -816,6 +865,9 @@ def read_stamp_values(rows: list[list[str]]) -> dict[str, str]:
     values[LABEL_DOC_CODE] = find_doc_code(rows)
     revision_row, revision_column = STAMP_CELLS[LABEL_REVISION]
     revision = anchored_cell(rows, revision_row, revision_column)
+    latest = latest_change_row(rows)
+    if latest >= 0:
+        revision = _row_value(rows, latest, 1)
     values[LABEL_REVISION] = _revision_value(revision) if revision else "0"
     _apply_anchor_blocks(rows, values)
     return values
@@ -1026,7 +1078,7 @@ def parse_stamp(file_path: str) -> dict[str, Any]:
     result["project_code"] = parsed["project_code"]
     result["section_code"] = parsed["section_code"]
     # Шифр без типа документа получает тип по умолчанию.
-    result["doc_type"] = parsed["doc_type"] or DEFAULT_DOC_TYPE
+    result["doc_type"] = normalize_doc_type(parsed["doc_type"] or DEFAULT_DOC_TYPE)
 
     result["revision"] = values.get(LABEL_REVISION, "") or "0"
     result["stage"] = values.get(LABEL_STAGE, "")
@@ -1034,6 +1086,9 @@ def parse_stamp(file_path: str) -> dict[str, Any]:
     result["object_name"] = values.get(LABEL_OBJECT, "")
     result["title"] = values.get(LABEL_TITLE, "")
     result["document_name"] = values.get(LABEL_DOCUMENT, "")
+    if result["doc_type"] == UNKNOWN_DOC_TYPE:
+        # Тип в шифре не указан: определяем по наименованию документа («Кабельный журнал» -> КЖ).
+        result["doc_type"] = doc_type_from_name(result["document_name"]) or result["doc_type"]
     result["stamp_profile"] = values.get(LABEL_PROFILE, "") or STAMP_PROFILE_UNKNOWN
     result["executors"] = best["executors"]
 
@@ -1041,8 +1096,15 @@ def parse_stamp(file_path: str) -> dict[str, Any]:
     date_source = "stamp"
     if not revision_date:
         revision_date, date_source = fallback_revision_date(file_path)
+    stamp_date = revision_date
+    # Дата в имени файла новее даты штампа — она и есть дата изменения.
+    name_date = newest_filename_date(filename)
+    if name_date and (not revision_date or name_date > revision_date):
+        revision_date, date_source = name_date, "filename"
     result["revision_date"] = revision_date
     result["revision_date_source"] = date_source
+    # Дата изменения (комплекта): из штампа, без учёта даты в имени файла.
+    result["stamp_date"] = stamp_date
 
     sheet, sheet_part = _sheet_numbers(values.get(LABEL_SHEET, ""))
     total = _to_int(values.get(LABEL_SHEETS, ""))
@@ -1054,7 +1116,7 @@ def parse_stamp(file_path: str) -> dict[str, Any]:
     result["sheets_total"] = total
 
     result["filename_dates"] = find_dates_in_filename(filename)
-    result["discrepancies"] = compare_with_filename(filename, result["revision"], revision_date)
+    result["discrepancies"] = compare_with_filename(filename, result["revision"], stamp_date)
 
     result["stamp_status"] = STAMP_OK if revision_date else STAMP_PARTIAL
     return result

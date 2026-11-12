@@ -22,6 +22,9 @@ from core.transformer.schema_analyzer import normalize_header
 
 HEADER_SCAN_DEPTH = 3
 MEDIA_RE = re.compile(r"^-+media/[^-]+-+")
+# docx2python ставит `--` перед абзацем-элементом списка; в самом документе его нет.
+# Режем только маркер в начале строки: `ГР--10.02` остаётся как есть.
+LIST_MARKER_RE = re.compile(r"^--(?=\s|$)[ \t ]*", re.MULTILINE)
 
 
 def clean_cell_text(cell: Any) -> str:
@@ -34,6 +37,7 @@ def clean_cell_text(cell: Any) -> str:
     else:
         text = str(cell)
     text = MEDIA_RE.sub("", text)
+    text = LIST_MARKER_RE.sub("", text)
     text = text.replace("\u00a0", " ")
     text = re.sub(r"[\r\n\t]+", " ", text)
     text = re.sub(r"\s+", " ", text)
@@ -156,7 +160,6 @@ class HeaderScan:
     positions: list[list[int]]  # номера строк шапки, из которых взяты уровни
     header_rows: int  # сколько строк заняла шапка
     data_start: int
-    group_prefix: str
     hierarchical: bool  # есть объединение ячеек по горизонтали над колонками
 
     @property
@@ -177,13 +180,12 @@ class HeaderScan:
 def scan_headers(table: list[list[str]]) -> HeaderScan:
     """Находит строки шапки и раскладывает их по колонкам."""
     if not table:
-        return HeaderScan([], [], 0, 0, "", False)
+        return HeaderScan([], [], 0, 0, False)
 
     width = max(len(row) for row in table)
     levels: list[list[str]] = [[] for _ in range(width)]
     positions: list[list[int]] = [[] for _ in range(width)]
     used_rows: list[list[str]] = []
-    group_prefix = ""
     data_start = len(table)
 
     for index, row in enumerate(table[:HEADER_SCAN_DEPTH]):
@@ -201,9 +203,11 @@ def scan_headers(table: list[list[str]]) -> HeaderScan:
         if _is_banner_row(normalised):
             continue
         if _is_group_row(normalised):
-            if any(levels) and _next_is_data(table, index, width):
-                break  # группа раздела данных, а не префикс подзаголовков
-            group_prefix = normalised[[i for i, c in enumerate(normalised) if c][0]]
+            # Строка-группа («1. Оборудование автоматики») — раздел данных, а не
+            # часть шапки: в имя колонки она не входит. После уровней шапки
+            # она открывает данные; до них (одиночная строка) просто пропускается.
+            if any(levels):
+                break
             continue
         for column, cell in enumerate(normalised):
             if cell:
@@ -219,7 +223,7 @@ def scan_headers(table: list[list[str]]) -> HeaderScan:
         for row in used_rows[:-1]
         for i in range(width - 1)
     )
-    return HeaderScan(levels, positions, len(used_rows), data_start, group_prefix, hierarchical)
+    return HeaderScan(levels, positions, len(used_rows), data_start, hierarchical)
 
 
 def join_levels(scan: HeaderScan, index: int) -> str:
@@ -232,17 +236,12 @@ def join_levels(scan: HeaderScan, index: int) -> str:
     parts = scan.levels[index]
     if scan.hierarchical:
         normalised = [normalize_header(part) for part in parts]
-        if scan.group_prefix:
-            normalised.insert(0, normalize_header(scan.group_prefix))
         return LEVEL_SEPARATOR.join(_collapse_repeats([part for part in normalised if part]))
 
     # docx2python повторяет текст объединённой ячейки в каждой покрытой
     # колонке/строке: подряд идущие одинаковые уровни схлопываем.
     parts = _collapse_repeats(parts)
-    joined = " ".join(parts)
-    if scan.group_prefix and joined:
-        joined = f"{scan.group_prefix} {joined}"
-    return joined
+    return " ".join(parts)
 
 
 def extract_headers(table: list[list[str]]) -> tuple[list[str], int]:

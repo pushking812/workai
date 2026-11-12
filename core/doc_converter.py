@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 
 WD_FORMAT_DOCX = 16
@@ -72,7 +73,12 @@ def read_doc_stamp_source(file_path: str, cache_dir: str) -> str:
     """
     if not is_doc_file(file_path):
         return file_path
-    name = os.path.splitext(os.path.basename(file_path))[0] + ".docx"
+    # Ключ кэша включает путь, размер и mtime: в папках ИЗМ0/ИЗМ1 файлы
+    # называются одинаково, а содержимое (штамп) разное.
+    stat = os.stat(file_path)
+    key = "|".join((os.path.abspath(file_path).lower(), str(stat.st_size), str(int(stat.st_mtime))))
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:10]
+    name = os.path.splitext(os.path.basename(file_path))[0] + "_" + digest + ".docx"
     target = os.path.join(cache_dir, name)
     if os.path.exists(target):
         return target

@@ -13,7 +13,7 @@ import sqlite3
 from typing import Any, Iterable
 
 DB_PATH = os.path.join("data", "app.db")
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 # Версия, добавившая блок «Маркировка кабелей» (V7_KZH_NAMES).
 SYNONYMS_V7_VERSION = 7
 # Версия, добавившая блок «Проход через» (V6_KZH_NAMES).
@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS files (
     is_current      INTEGER NOT NULL DEFAULT 1,
     schema_hash     TEXT,
     csv_path        TEXT,
+    meta_json       TEXT,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(hash, path)
 )
@@ -143,6 +144,31 @@ KZH_SYNONYMS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# Колонки СО (спецификация оборудования), версия 8. Для NПП, ЕдИзм, КолВо
+# здесь только дополнительные написания; сами имена уже есть в SEED_SYNONYMS.
+SO_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "NПП": ("поз", "поз.", "позиция"),
+    "ЕдИзм": ("ед изме ре ния", "ед. изме- ре- ния"),
+    "КолВо": ("коли чест во", "коли- чест- во"),
+    "НаименованиеИТехХар": (
+        "наименование и техническая характеристика",
+        "наименование и техн. характеристика",
+    ),
+    "ТипМаркаОбозначение": (
+        "тип, марка, обозначение документа, опросного листа",
+        "тип марка обозначение документа опросного листа",
+    ),
+    "КодПродукции": (
+        "код продукции",
+        "код оборудования, изделия, материала",
+    ),
+    "Поставщик": ("поставщик", "завод-изготовитель", "завод изготовитель"),
+    "Масса1ЕдКг": ("масса 1 ед., кг", "масса единицы, кг", "масса ед., кг"),
+    "Примечание": ("примечание", "прим.", "приме- чание", "приме чание"),
+}
+# Версия, добавившая колонки СО (SO_SYNONYMS).
+SYNONYMS_V8_VERSION = 8
+
 V7_KZH_NAMES: tuple[str, ...] = (
     "NКабеляИЦвеБир",
     "МаркировкаКабелей|СторонаБирки|Лицевая",
@@ -192,6 +218,7 @@ FILES_COLUMNS = (
     "is_current",
     "schema_hash",
     "csv_path",
+    "meta_json",
     "created_at",
 )
 
@@ -231,6 +258,8 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
     existing = {row["name"] for row in connection.execute("PRAGMA table_info(files)")}
     if "schema_hash" not in existing:
         connection.execute("ALTER TABLE files ADD COLUMN schema_hash TEXT")
+    if "meta_json" not in existing:
+        connection.execute("ALTER TABLE files ADD COLUMN meta_json TEXT")
     for statement in CREATE_INDEXES:
         connection.execute(statement)
     previous_version = connection.execute("PRAGMA user_version").fetchone()[0]
@@ -249,7 +278,16 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
             migrate_synonyms_v6(connection)
         if previous_version < SYNONYMS_V7_VERSION:
             migrate_synonyms_v7(connection)
+        if previous_version < SYNONYMS_V8_VERSION:
+            migrate_synonyms_v8(connection)
     return connection
+
+
+def migrate_synonyms_v8(connection: sqlite3.Connection) -> None:
+    """БД версии 7 -> 8: колонки СО. Существующие записи не меняются."""
+    for canonical, synonyms in SO_SYNONYMS.items():
+        for synonym in (canonical, *synonyms):
+            add_synonym(connection, canonical, synonym, 1.0)
 
 
 def migrate_synonyms_v5(connection: sqlite3.Connection) -> None:
@@ -360,6 +398,13 @@ def add_file(
     for field in STAMP_FIELDS:
         if field in stamp:
             values[field] = stamp[field]
+    if stamp.get("revision_date_source"):
+        # Откуда взята дата изменения (stamp / filename / modified): нужно для пометки в таблице.
+        # stamp_date — дата изменения по штампу: это дата комплекта.
+        meta = {"revision_date_source": stamp["revision_date_source"]}
+        if stamp.get("stamp_date"):
+            meta["stamp_date"] = stamp["stamp_date"]
+        values["meta_json"] = json.dumps(meta, ensure_ascii=False)
 
     columns = ", ".join(values)
     placeholders = ", ".join("?" for _ in values)
@@ -369,6 +414,42 @@ def add_file(
     )
     connection.commit()
     return int(cursor.lastrowid)
+
+
+def update_file_meta(connection: sqlite3.Connection, file_hash: str, meta: dict[str, Any]) -> None:
+    """Дописывает метаданные (JSON) ко всем записям файла с этим хэшем.
+
+    Ключи `meta` заменяют одноимённые, остальные ключи сохраняются.
+    Сюда попадает то, что берётся из таблиц документа, а не из штампа
+    (например, шифры по стадиям из шапки СВОР: `stage_codes`).
+    """
+    if not meta:
+        return
+    rows = connection.execute(
+        "SELECT id, meta_json FROM files WHERE hash = ?", (file_hash,)
+    ).fetchall()
+    for row in rows:
+        current = json.loads(row["meta_json"]) if row["meta_json"] else {}
+        current.update(meta)
+        connection.execute(
+            "UPDATE files SET meta_json = ? WHERE id = ?",
+            (json.dumps(current, ensure_ascii=False), row["id"]),
+        )
+    connection.commit()
+
+
+def update_file_meta_by_id(connection: sqlite3.Connection, file_id: int, meta: dict[str, Any]) -> None:
+    """Как `update_file_meta`, но для одной записи (одного пути)."""
+    row = connection.execute("SELECT meta_json FROM files WHERE id = ?", (file_id,)).fetchone()
+    if row is None or not meta:
+        return
+    current = json.loads(row["meta_json"]) if row["meta_json"] else {}
+    current.update(meta)
+    connection.execute(
+        "UPDATE files SET meta_json = ? WHERE id = ?",
+        (json.dumps(current, ensure_ascii=False), file_id),
+    )
+    connection.commit()
 
 
 def update_file_status(
@@ -508,9 +589,10 @@ def seed_dictionary(connection: sqlite3.Connection) -> int:
     Идемпотентна и ничего не перезаписывает: ручные синонимы сохраняются.
     """
     added = 0
-    for canonical, synonyms in {**SEED_SYNONYMS, **KZH_SYNONYMS}.items():
-        for synonym in (canonical, *synonyms):
-            added += add_synonym(connection, canonical, synonym, 1.0)
+    for source in (SEED_SYNONYMS, KZH_SYNONYMS, SO_SYNONYMS):
+        for canonical, synonyms in source.items():
+            for synonym in (canonical, *synonyms):
+                added += add_synonym(connection, canonical, synonym, 1.0)
     return added
 
 

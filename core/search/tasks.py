@@ -38,6 +38,18 @@ def default_saver(path: str, file_hash: str, connection: Any, exports_dir: str) 
     return export_tables(source, file_hash, exports_dir, connection)
 
 
+def _already_saved(document: dict[str, Any] | None) -> bool:
+    """CSV файла уже выгружен и лежит на диске (статус не ERROR/HIDDEN)."""
+    if not document or document.get("status") not in (
+        FileStatus.SAVED.value,
+        FileStatus.READY.value,
+        FileStatus.NEEDS_MAPPING.value,
+    ):
+        return False
+    paths = [p.strip() for p in str(document.get("csv_path") or "").split(";") if p.strip()]
+    return bool(paths) and all(os.path.isfile(p) for p in paths)
+
+
 class TaskManager:
     _instance: "TaskManager | None" = None
     _instance_lock = threading.Lock()
@@ -63,8 +75,21 @@ class TaskManager:
     # --- постановка задач -------------------------------------------------
 
     def save_files(self, file_ids: list[int]) -> int:
-        """Ставит файлы в очередь «Сохранить». Возвращает число принятых."""
-        return self._enqueue(KIND_SAVE, file_ids)
+        """Ставит файлы в очередь «Сохранить». Возвращает число принятых.
+
+        Уже сохранённые файлы (CSV на диске) пропускаются: изменённый файл при
+        повторном поиске получает новую запись (другой хэш) без CSV и сохраняется.
+        """
+        connection = database.init_db(self.db_path)
+        try:
+            ids = [
+                int(i)
+                for i in dict.fromkeys(file_ids)
+                if not _already_saved(database.get_file_by_id(connection, int(i)))
+            ]
+        finally:
+            connection.close()
+        return self._enqueue(KIND_SAVE, ids)
 
     def prepare_files(self, file_ids: list[int] | None = None) -> int:
         """Ставит в очередь «Подготовить»; без списка — все актуальные `SAVED`."""

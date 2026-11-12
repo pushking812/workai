@@ -48,6 +48,8 @@ class SearchManager:
         mask: str = "*",
         on_file: FileCallback | None = None,
         extensions: tuple[str, ...] = DEFAULT_EXTENSIONS,
+        name_words: Iterable[str] | None = None,
+        folder_filters: Iterable[str] | None = None,
     ) -> bool:
         """Запускает поиск. False, если поиск уже идёт."""
         with self._lock:
@@ -61,7 +63,10 @@ class SearchManager:
             self.stopped = False
             self.thread = threading.Thread(
                 target=self._search_worker,
-                args=(list(directories), mask, on_file, extensions),
+                args=(
+                    list(directories), mask, on_file, extensions,
+                    list(name_words or ()), list(folder_filters or ()),
+                ),
                 daemon=True,
             )
             self.thread.start()
@@ -94,8 +99,12 @@ class SearchManager:
         mask: str,
         on_file: FileCallback | None,
         extensions: tuple[str, ...],
+        name_words: list[str] | None = None,
+        folder_filters: list[str] | None = None,
     ) -> None:
-        for path in scan_files(directories, mask, extensions, self.stop_event.is_set):
+        for path in scan_files(
+            directories, mask, extensions, self.stop_event.is_set, name_words, folder_filters
+        ):
             if self.stop_event.is_set():
                 break
             self.total_found += 1

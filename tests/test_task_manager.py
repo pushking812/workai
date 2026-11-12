@@ -106,3 +106,17 @@ def test_restart_after_finish(tmp_path, monkeypatch):
     manager.save_files([second])
     assert manager.wait(10)
     assert manager.get_status()["processed"] == 2
+
+
+def test_saved_file_with_csv_is_not_saved_again(tmp_path, monkeypatch):
+    db = _db(tmp_path, monkeypatch)
+    csv = tmp_path / "a.csv"
+    csv.write_text("x")
+    file_id = _add(db, "done")
+    manager = TaskManager(db, lambda *args: str(csv))
+    assert manager.save_files([file_id]) == 1
+    assert manager.wait(10)
+    assert manager.save_files([file_id]) == 0  # CSV на диске, файл не менялся
+    csv.unlink()
+    assert manager.save_files([file_id]) == 1  # CSV потерян — сохраняем заново
+    assert manager.wait(10)

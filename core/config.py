@@ -6,16 +6,60 @@ import json
 import os
 from typing import Any
 
+from core.doc_types import KNOWN_DOC_TYPES
+
 CONFIG_PATH = os.path.join("data", "config.json")
 
 DEFAULTS: dict[str, Any] = {
     "directories": [],
+    "root": "",
+    "kits": [],
+    "known_types": list(KNOWN_DOC_TYPES),
+    "hide_unknown": False,
+    "type_aliases": {},
+    "search_by_type": False,
+    "folder_filters": ["Изм", "Ред. формат"],
     "background_mode": True,
     "interval_minutes": 60,
     "ui": {},
 }
 
-TREE_MODES = ("type-section", "section-type")
+
+def _str_list(raw: Any) -> list[str]:
+    """Список непустых уникальных строк (порядок сохраняется)."""
+    result: list[str] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, str) and item.strip() and item.strip() not in result:
+                result.append(item.strip())
+    return result
+
+
+def _normalize_aliases(raw: Any, types: list[str]) -> dict[str, list[str]]:
+    """Алиасы по известным типам: {тип: [алиас, ...]}; чужие типы отбрасываются."""
+    result: dict[str, list[str]] = {}
+    if isinstance(raw, dict):
+        for name in types:
+            aliases = [a for a in _str_list(raw.get(name)) if a.lower() != name.lower()]
+            if aliases:
+                result[name] = aliases
+    return result
+
+
+def search_words(settings: dict[str, Any]) -> list[str]:
+    """Слова для отбора файлов по имени: типы и их алиасы (если включён поиск по типу).
+
+    Пустой список означает «не фильтровать».
+    """
+    if not settings.get("search_by_type"):
+        return []
+    aliases = settings.get("type_aliases") or {}
+    words: list[str] = []
+    for name in settings.get("known_types") or []:
+        for word in [name, *aliases.get(name, [])]:
+            if word and word.lower() not in (w.lower() for w in words):
+                words.append(word)
+    return words
 
 
 def _normalize_ui(raw: Any) -> dict[str, Any]:
@@ -23,8 +67,6 @@ def _normalize_ui(raw: Any) -> dict[str, Any]:
     ui: dict[str, Any] = {}
     if not isinstance(raw, dict):
         return ui
-    if raw.get("tree_mode") in TREE_MODES:
-        ui["tree_mode"] = raw["tree_mode"]
     sort = raw.get("sort")
     if isinstance(sort, dict) and isinstance(sort.get("key"), str) and sort.get("dir") in (1, -1):
         ui["sort"] = {"key": sort["key"], "dir": sort["dir"]}
@@ -37,6 +79,8 @@ def _normalize_ui(raw: Any) -> dict[str, Any]:
 
 def _normalize(raw: Any) -> dict[str, Any]:
     data = dict(DEFAULTS)
+    data["known_types"] = list(KNOWN_DOC_TYPES)
+    data["folder_filters"] = list(DEFAULTS["folder_filters"])
     if not isinstance(raw, dict):
         return data
     dirs = raw.get("directories")
@@ -46,6 +90,18 @@ def _normalize(raw: Any) -> dict[str, Any]:
             if isinstance(item, str) and item and item not in seen:
                 seen.append(item)
         data["directories"] = seen
+    if isinstance(raw.get("root"), str):
+        data["root"] = raw["root"].strip()
+    data["kits"] = _str_list(raw.get("kits"))
+    if isinstance(raw.get("known_types"), list):
+        data["known_types"] = _str_list(raw["known_types"])
+    if isinstance(raw.get("hide_unknown"), bool):
+        data["hide_unknown"] = raw["hide_unknown"]
+    data["type_aliases"] = _normalize_aliases(raw.get("type_aliases"), data["known_types"])
+    if isinstance(raw.get("search_by_type"), bool):
+        data["search_by_type"] = raw["search_by_type"]
+    if isinstance(raw.get("folder_filters"), list):
+        data["folder_filters"] = _str_list(raw["folder_filters"])
     if isinstance(raw.get("background_mode"), bool):
         data["background_mode"] = raw["background_mode"]
     try:

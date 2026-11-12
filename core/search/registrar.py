@@ -76,6 +76,7 @@ class FileRegistrar:
             "doc_code": result["doc_code"],
             "revision": result["revision"],
             "revision_date": result["revision_date"],
+            "revision_date_source": result.get("revision_date_source", ""),
             "result": result["result"],
             "ui_status": RESULT_TO_UI[result["result"]].value,
         }

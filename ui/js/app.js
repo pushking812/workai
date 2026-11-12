@@ -24,20 +24,31 @@ const state = {
   stoppedByUser: false,
   hiddenMode: false,
   timer: null,
-  dirs: [],
+  root: "",
+  kits: [],
+  subfolders: [],
+  knownTypes: ["ВОР", "СВОР", "СО", "КЖ"],
+  hideUnknown: false,
+  typeAliases: {},
+  searchByType: false,
   interval: 60,
   bgTimer: null,
   expanded: new Set(),
-  treeMode: localStorage.getItem("treeMode") === "section-type" ? "section-type" : "type-section",
 };
 
-const NO_TYPE = "Без типа";
-const NO_SECTION = "Без раздела";
+// Папки поиска = выбранные комплекты внутри корневой папки.
+function searchDirs() {
+  if (!state.root) return [];
+  const sep = state.root.includes("\\") ? "\\" : "/";
+  const base = state.root.replace(/[\\/]+$/, "");
+  return state.kits.map((name) => base + sep + name);
+}
 
 const $ = (id) => document.getElementById(id);
 const el = {
   body: $("grid-body"), empty: $("empty"), status: $("status-text"), progress: $("progress"),
   search: $("btn-search"), stop: $("btn-stop"), add: $("btn-add"), save: $("btn-save"),
+  queries: $("btn-queries"),
   hide: $("btn-hide"), showHidden: $("btn-show-hidden"), exit: $("btn-exit"),
   settings: $("btn-settings"), filter: $("input-filter"),
   selectAll: $("btn-select-all"), chkAll: $("chk-all"), count: $("selected-count"),
@@ -48,15 +59,7 @@ function api() {
   return window.pywebview.api;
 }
 
-$("select-tree").value = state.treeMode;
-$("select-tree").addEventListener("change", (e) => {
-  state.treeMode = e.target.value;
-  localStorage.setItem("treeMode", state.treeMode);
-  saveUi();
-  render();
-});
-
-// Состояние основного окна (дерево, сортировка, фильтр, раскрытые группы) хранится в конфиге.
+// Состояние основного окна (сортировка, фильтр, раскрытые группы) хранится в конфиге.
 let uiTimer = null;
 function saveUi() {
   clearTimeout(uiTimer);
@@ -64,7 +67,6 @@ function saveUi() {
     try {
       api().save_settings({
         ui: {
-          tree_mode: state.treeMode,
           sort: state.sort,
           filter: state.filter,
           expanded: [...state.expanded],
@@ -76,10 +78,6 @@ function saveUi() {
 
 function applyUi(ui) {
   if (!ui) return;
-  if (ui.tree_mode) {
-    state.treeMode = ui.tree_mode;
-    $("select-tree").value = state.treeMode;
-  }
   if (ui.sort) state.sort = ui.sort;
   if (typeof ui.filter === "string") {
     state.filter = ui.filter;
@@ -153,6 +151,7 @@ function formatTime(seconds) {
 function visibleRows() {
   const needle = state.filter.trim().toLowerCase();
   let rows = state.rows.filter((r) => (r.db_status === "HIDDEN") === state.hiddenMode);
+  if (state.hideUnknown) rows = rows.filter((r) => state.knownTypes.includes(r.doc_type));
   if (needle) {
     rows = rows.filter((r) =>
       [r.doc_code, r.revision, r.revision_date, r.filename, r.path, STATUS_LABELS[r.status]]
@@ -195,28 +194,55 @@ function badge(row) {
   return span;
 }
 
-// Структура дерева: "type-section" (Тип -> Код раздела) или "section-type"
-function buildTree(rows) {
-  const swap = state.treeMode === "section-type";
-  const top = new Map();
+// Дерево «по комплекту»: Шифр -> Номер изменения -> Дата (узла типа документа нет).
+function shortDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || "");
+  return m ? `${m[3]}.${m[2]}.${m[1].slice(2)}` : (iso || "без даты");
+}
+
+function buildKitTree(rows) {
+  const codes = new Map();
   for (const row of rows) {
-    const type = row.doc_type || NO_TYPE;
-    const section = row.section_code || NO_SECTION;
-    const [a, b] = swap ? [section, type] : [type, section];
-    if (!top.has(a)) top.set(a, new Map());
-    const sub = top.get(a);
-    if (!sub.has(b)) sub.set(b, []);
-    sub.get(b).push(row);
+    const code = row.kit_code || "Без шифра";
+    const rev = row.kit_revision ?? 0;
+    const date = row.kit_date || "";
+    if (!codes.has(code)) codes.set(code, new Map());
+    const revs = codes.get(code);
+    if (!revs.has(rev)) revs.set(rev, new Map());
+    const dates = revs.get(rev);
+    if (!dates.has(date)) dates.set(date, []);
+    dates.get(date).push(row);
   }
-  const byName = (x, y) => x[0].localeCompare(y[0], "ru", { numeric: true });
-  const mode = state.treeMode;
-  return [...top].sort(byName).map(([a, sub]) => ({
-    name: a,
-    key: mode + ":t:" + a,
-    sections: [...sub].sort(byName).map(([b, files]) => ({
-      name: b, key: mode + ":s:" + a + "|" + b, files,
+  const byName = (x, y) => String(x[0]).localeCompare(String(y[0]), "ru", { numeric: true });
+  return [...codes].sort(byName).map(([code, revs]) => ({
+    name: code, key: "kit:c:" + code,
+    revisions: [...revs].sort(byName).map(([rev, dates]) => ({
+      name: `Изм.${rev}`, key: `kit:r:${code}|${rev}`,
+      dates: [...dates].sort(byName).map(([date, files]) => ({
+        name: `от ${shortDate(date)}`, key: `kit:d:${code}|${rev}|${date}`, files,
+      })),
     })),
   }));
+}
+
+function renderKitTree(rows) {
+  for (const code of buildKitTree(rows)) {
+    const codeFiles = code.revisions.flatMap((r) => r.dates.flatMap((d) => d.files));
+    const head = groupRow(code.name, code.key, 1, codeFiles);
+    el.body.appendChild(head.tr);
+    if (!head.open) continue;
+    for (const rev of code.revisions) {
+      const revHead = groupRow(rev.name, rev.key, 2, rev.dates.flatMap((d) => d.files));
+      el.body.appendChild(revHead.tr);
+      if (!revHead.open) continue;
+      for (const date of rev.dates) {
+        const dateHead = groupRow(date.name, date.key, 3, date.files);
+        el.body.appendChild(dateHead.tr);
+        if (!dateHead.open) continue;
+        for (const row of date.files) el.body.appendChild(fileRow(row));
+      }
+    }
+  }
 }
 
 function groupRow(label, key, level, files) {
@@ -255,21 +281,57 @@ function groupRow(label, key, level, files) {
   return { tr, open };
 }
 
-function render() {
-  const rows = visibleRows();
-  el.body.replaceChildren();
-  for (const type of buildTree(rows)) {
-    const typeFiles = type.sections.flatMap((s) => s.files);
-    const head = groupRow(type.name, type.key, 1, typeFiles);
-    el.body.appendChild(head.tr);
-    if (!head.open) continue;
-    for (const section of type.sections) {
-      const sub = groupRow(section.name, section.key, 2, section.files);
-      el.body.appendChild(sub.tr);
-      if (!sub.open) continue;
-      for (const row of section.files) el.body.appendChild(fileRow(row));
+// Ширина столбцов Статус, Размер, Дата файла — по самому длинному значению (и заголовку).
+const FIT_COLUMNS = [["c-status", 22], ["c-size", 0], ["c-mtime", 0]];
+let measureCtx = null;
+
+function fitColumns() {
+  if (!measureCtx) measureCtx = document.createElement("canvas").getContext("2d");
+  const probe = document.querySelector("#grid-body td") || document.querySelector("#grid thead th");
+  measureCtx.font = getComputedStyle(probe).font;
+  const rows = [...el.body.querySelectorAll("tr:not(.group)")];
+  const head = [...document.querySelectorAll("#grid thead th")];
+  for (const [cls, extra] of FIT_COLUMNS) {
+    const col = document.querySelector("col." + cls);
+    const index = [...col.parentNode.children].indexOf(col);
+    let widest = measureCtx.measureText(head[index].textContent).width + 18;  // + стрелка сортировки
+    for (const tr of rows) {
+      const td = tr.children[index];
+      if (td) widest = Math.max(widest, measureCtx.measureText(td.textContent).width + extra);
+    }
+    col.style.width = Math.ceil(widest + 14) + "px";  // + отступы ячейки
+  }
+}
+
+// Свернуть/развернуть всё дерево: если что-то раскрыто, сворачиваем, иначе раскрываем все узлы.
+function toggleTree() {
+  const keys = [];
+  for (const c of buildKitTree(visibleRows())) {
+    keys.push(c.key);
+    for (const r of c.revisions) {
+      keys.push(r.key);
+      for (const d of r.dates) keys.push(d.key);
     }
   }
+  if (keys.some((k) => state.expanded.has(k))) {
+    for (const k of keys) state.expanded.delete(k);
+  } else {
+    for (const k of keys) state.expanded.add(k);
+  }
+  saveUi();
+  render();
+}
+
+function render() {
+  const rows = visibleRows();
+  const tb = document.getElementById("btn-toggle-tree");
+  if (tb) {
+    const any = [...state.expanded].some((k) => k.startsWith("kit:"));
+    tb.title = any ? "Свернуть дерево" : "Развернуть дерево";
+  }
+  el.body.replaceChildren();
+  renderKitTree(rows);
+  fitColumns();
   el.empty.hidden = rows.length > 0;
   el.empty.textContent = state.hiddenMode
     ? "Скрытых файлов нет."
@@ -296,9 +358,25 @@ function fileRow(row) {
   check.appendChild(box);
   tr.appendChild(check);
 
-  tr.appendChild(cell(row.doc_code, "doc_code"));
+  const codeCell = cell(row.doc_code, "doc_code");
+  if (row.kit_problem || row.kit_forced) {
+    // Проблема с файлом: штамп не сходится с папкой комплекта (или принят в комплект вручную).
+    tr.classList.add("kit-problem");
+    codeCell.textContent = (row.doc_code || "") + " ⓘ";
+    codeCell.title = "Проблема с файлом: " + (row.kit_problem || "принят в комплект вручную");
+  }
+  tr.appendChild(codeCell);
   tr.appendChild(cell(row.revision, "revision"));
-  tr.appendChild(cell(row.revision_date, "revision_date"));
+  const dateCell = cell(row.revision_date, "revision_date");
+  if (row.revision_date && row.revision_date_source === "filename") {
+    // дата взята из имени файла (новее даты штампа): пользователь должен это видеть
+    dateCell.textContent = row.revision_date + " ⓘ";
+    dateCell.title = "Дата взята из имени файла (она новее даты в штампе)";
+  } else if (row.revision_date && row.revision_date_source === "modified") {
+    dateCell.textContent = row.revision_date + " ⓘ";
+    dateCell.title = "Даты нет ни в штампе, ни в имени: взята дата изменения файла";
+  }
+  tr.appendChild(dateCell);
   tr.appendChild(cell(row.filename, "filename"));
   tr.appendChild(cell(row.dir, "path"));
   const status = document.createElement("td");
@@ -306,6 +384,9 @@ function fileRow(row) {
   tr.appendChild(status);
   tr.appendChild(cell(formatSize(row.size), "size"));
   tr.appendChild(cell(formatTime(row.file_mtime), "file_mtime"));
+  // Временное решение: двойной щелчок по сохранённому файлу открывает его CSV.
+  // Только по ячейке статуса: двойной щелчок по тексту выделяет слово, а не открывает файл.
+  status.addEventListener("dblclick", () => openCsv(row));
   return tr;
 }
 
@@ -327,6 +408,7 @@ function updateControls() {
   el.save.title = state.hiddenMode
     ? "Вернуть в список файлы со снятой галочкой"
     : "Сохранить выделенные файлы";
+  el.queries.disabled = state.hiddenMode || state.selected.size === 0 || state.tasksRunning;
   el.showHidden.classList.toggle("active", state.hiddenMode);
   el.showHidden.title = state.hiddenMode ? "Вернуться к списку файлов" : "Показать скрытые файлы";
   el.search.disabled = state.searching;
@@ -420,7 +502,7 @@ async function poll() {
 // ---------- Действия ----------
 
 async function onSearch() {
-  if (!state.dirs.length) {
+  if (!searchDirs().length) {
     openSettings();
     return;
   }
@@ -435,7 +517,7 @@ async function runSearch() {
   // При выключенном фоновом режиме start_search возвращается после конца поиска,
   // поэтому опрос запускаем отдельно и с небольшой задержкой (поиск должен успеть стартовать).
   setTimeout(startPolling, 300);
-  const result = await api().start_search(state.dirs, "*", el.background.checked);
+  const result = await api().start_search(searchDirs(), "*", el.background.checked);
   if (result.status === "error") {
     state.searching = false;
     setStatus("Готово", null);
@@ -497,11 +579,157 @@ async function onSave() {
   }
   const ids = [...state.selected];
   if (!ids.length) return;
-  await api().process_selected(ids);
+  // Проверка комплекта: документ не из своего комплекта — «Отмена» или «Принять всё равно».
+  const kit = await api().check_kits(ids);
+  const conflicts = (kit && kit.conflicts) || [];
+  if (conflicts.length) {
+    const shown = conflicts.slice(0, 10)
+      .map((c) => `• ${c.path}\n   ${c.message}`).join("\n");
+    const more = conflicts.length > 10 ? `\n… и ещё ${conflicts.length - 10}` : "";
+    const accept = window.confirm(
+      `Документы не принадлежат комплекту (${conflicts.length}):\n${shown}${more}\n\n` +
+      "ОК — принять всё равно (файлы будут помечены ⓘ), Отмена — не сохранять.");
+    if (!accept) {
+      setStatus("Сохранение отменено: документы не из комплекта", null);
+      return;
+    }
+  }
+  const queued = await api().process_selected(ids, conflicts.map((c) => c.id));
+  if (queued && queued.queued === 0) {
+    setStatus("Выбранные файлы уже сохранены и не изменились", null);
+    return;
+  }
   state.tasksRunning = true;
   setStatus("Обработка...", null);
   updateControls();
   startPolling();
+}
+
+// Диалог решений по заголовкам без роли. Возвращает решения или null при отмене.
+function headersDialog(data) {
+  return new Promise((resolve) => {
+    const list = $("headers-list");
+    list.replaceChildren();
+    const rows = [];
+    for (const item of data.unresolved) {
+      const box = document.createElement("div");
+      box.className = "header-item";
+      const title = document.createElement("div");
+      title.className = "header-title";
+      title.textContent = `«${item.header}» — в ${item.count} CSV`;
+      box.appendChild(title);
+      for (const f of item.files) {
+        const where = document.createElement("div");
+        where.className = "muted";
+        where.textContent = `${f.path || f.filename}, колонка ${f.column}`;
+        if (f.path) {
+          where.style.cursor = "pointer";
+          where.title = "Щелчок — открыть файл в Word";
+          where.addEventListener("click", async () => {
+            const res = await api().open_document(f.path);
+            if (res && res.status !== "ok") alert(res.message || "Не удалось открыть файл");
+          });
+        }
+        box.appendChild(where);
+      }
+      if (item.suspicious) {
+        const warn = document.createElement("div");
+        warn.className = "header-warn";
+        warn.textContent = "Похоже на строку данных, а не шапку: проверьте файл, роль не создавайте.";
+        box.appendChild(warn);
+      }
+      const action = document.createElement("select");
+      for (const [value, label] of [["skip", "Пропустить"], ["assign", "Назначить существующей"],
+                                    ["new", "Новая роль"], ["ignore", "Игнорировать всегда"]]) {
+        action.add(new Option(label, value));
+      }
+      const role = document.createElement("select");
+      const cands = item.candidates.map((c) => c.canonical);
+      const labels = new Map(item.candidates.map((c) => [c.canonical, ` (${c.score})`]));
+      for (const name of [...cands, ...data.roles.filter((r) => !cands.includes(r))]) {
+        role.add(new Option(name + (labels.get(name) || ""), name));
+      }
+      const newName = document.createElement("input");
+      newName.type = "text";
+      newName.value = item.header;
+      newName.title = "Имя новой роли";
+      const sync = () => {
+        role.hidden = action.value !== "assign";
+        newName.hidden = action.value !== "new";
+      };
+      action.addEventListener("change", sync);
+      sync();
+      const line = document.createElement("div");
+      line.className = "dict-row";
+      line.append(action, role, newName);
+      box.appendChild(line);
+      list.appendChild(box);
+      rows.push({ item, action, role, newName });
+    }
+    const popup = $("headers-popup");
+    const done = (answer) => {
+      popup.hidden = true;
+      $("headers-apply").onclick = null;
+      $("headers-cancel").onclick = null;
+      resolve(answer);
+    };
+    $("headers-apply").onclick = () => done(rows.map((r) => ({
+      header: r.item.header,
+      action: r.action.value,
+      role: r.action.value === "new" ? r.newName.value : r.role.value,
+    })));
+    $("headers-cancel").onclick = () => done(null);
+    popup.hidden = false;
+  });
+}
+
+async function onBuildQueries() {
+  if (state.tasksRunning) return;
+  const ids = [...state.selected];
+  if (!ids.length) return;
+  setStatus("Проверка заголовков...", null);
+  const check = await api().check_headers(ids);
+  if (check.status === "ok" && check.unresolved.length) {
+    const decisions = await headersDialog(check);
+    if (decisions === null) {
+      setStatus("Формирование запросов отменено", null);
+      return;
+    }
+    const applied = await api().apply_header_decisions(decisions);
+    if (applied.status !== "ok") showError("Не все решения применены:\n" + applied.errors.join("\n"));
+  }
+  setStatus("Формирование запросов...", null);
+  const result = await api().build_queries(ids);
+  if (result.status !== "ok") {
+    setStatus("Запросы не сформированы", null);
+    showError(result.message || "Не удалось сформировать запросы");
+    return;
+  }
+  const rows = result.books.reduce((sum, b) => sum + b.rows, 0);
+  const skipped = (result.skipped || []).length;
+  setStatus(`Запросы сформированы: книг ${result.books.length}, строк ${rows}` +
+    (skipped ? `, пропущено файлов ${skipped}` : ""), null);
+  const notes = [];
+  if (skipped) {
+    notes.push("Пропущены файлы:\n" + result.skipped.map((s) => `${s.filename}: ${s.reason}`).join("\n"));
+  }
+  const ambiguous = result.books.flatMap((b) => b.ambiguous_versions || []);
+  if (ambiguous.length) {
+    notes.push("Одна версия документа (шифр, номер и дата изменения) найдена в нескольких файлах. " +
+      "Связь ВОР и СО будет неоднозначной: выберите в таблице нужный файл или уберите лишний и сформируйте запросы заново.\n" +
+      ambiguous.map((a) => `${a.doc_code}, изм. ${a.revision || "—"}, ${a.revision_date || "без даты"}:\n  ` +
+        a.files.map((f) => f.filename).join("\n  ")).join("\n"));
+  }
+  if (notes.length) showError(notes.join("\n\n"));
+}
+
+async function openCsv(row) {
+  if (!row.csv_path) {
+    setStatus("У файла нет сохранённого CSV", null);
+    return;
+  }
+  const result = await api().open_csv(row.id);
+  if (result.status !== "ok") showError(result.message || "Не удалось открыть CSV");
 }
 
 async function onExit() {
@@ -524,27 +752,26 @@ async function onClearDb() {
   setStatus(`База очищена: записей ${result.records}, CSV ${result.csv_deleted}`, null);
 }
 
-// ---------- Папки поиска (настройки) ----------
+// ---------- Комплекты поиска и типы документов (настройки) ----------
 
 async function loadSettings() {
   let settings = null;
   try { settings = await api().get_settings(); } catch (e) { settings = null; }
   settings = settings || {};
-  // Однократный перенос папок из прежнего хранилища браузера.
-  let dirs = Array.isArray(settings.directories) ? settings.directories : [];
-  let migrated = false;
-  if (!dirs.length) {
-    try { dirs = JSON.parse(localStorage.getItem("dirs") || "[]"); } catch (e) { dirs = []; }
-    const legacy = localStorage.getItem("folder");
-    if (!dirs.length && legacy) dirs = [legacy];
-    migrated = dirs.length > 0;
-  }
-  state.dirs = Array.isArray(dirs) ? dirs.filter(Boolean) : [];
+  state.root = typeof settings.root === "string" ? settings.root : "";
+  state.kits = Array.isArray(settings.kits) ? settings.kits.filter(Boolean) : [];
+  if (Array.isArray(settings.known_types)) state.knownTypes = settings.known_types;
+  state.hideUnknown = settings.hide_unknown === true;
+  $("chk-hide-unknown").checked = state.hideUnknown;
+  state.typeAliases = settings.type_aliases && typeof settings.type_aliases === "object" ? settings.type_aliases : {};
+  state.searchByType = settings.search_by_type === true;
+  $("chk-search-by-type").checked = state.searchByType;
+  state.folderFilters = Array.isArray(settings.folder_filters) ? settings.folder_filters : [];
   if (typeof settings.background_mode === "boolean") el.background.checked = settings.background_mode;
   state.interval = Number(settings.interval_minutes) || 60;
   $("input-interval").value = state.interval;
   applyUi(settings.ui);
-  if (migrated) await persistSettings();
+  if (state.root) await loadSubfolders();
 }
 
 async function persistSettings() {
@@ -552,7 +779,14 @@ async function persistSettings() {
   state.interval = minutes;
   try {
     await api().save_settings({
-      directories: state.dirs,
+      root: state.root,
+      kits: state.kits,
+      directories: searchDirs(),
+      known_types: state.knownTypes,
+      hide_unknown: state.hideUnknown,
+      type_aliases: state.typeAliases,
+      search_by_type: state.searchByType,
+      folder_filters: state.folderFilters || [],
       background_mode: el.background.checked,
       interval_minutes: minutes,
     });
@@ -561,16 +795,24 @@ async function persistSettings() {
   }
 }
 
+async function loadSubfolders() {
+  const result = await api().list_subfolders(state.root);
+  state.subfolders = result.status === "ok" ? result.folders : [];
+  if (result.status !== "ok") showError(result.message || "Не удалось прочитать корневую папку");
+  // Выбранные комплекты, которых больше нет в корне, отбрасываем.
+  state.kits = state.kits.filter((k) => state.subfolders.includes(k));
+}
+
 // Фоновый поиск: при включённом режиме и хотя бы одной папке ищем сразу и затем каждые N минут.
 function scheduleBackground() {
   if (state.bgTimer) clearInterval(state.bgTimer);
   state.bgTimer = null;
-  if (!el.background.checked || !state.dirs.length) return;
+  if (!el.background.checked || !searchDirs().length) return;
   state.bgTimer = setInterval(backgroundTick, state.interval * 60000);
 }
 
 function backgroundTick() {
-  if (!el.background.checked || !state.dirs.length) return;
+  if (!el.background.checked || !searchDirs().length) return;
   if (state.searching || state.tasksRunning) return;
   runSearch();
 }
@@ -582,44 +824,394 @@ async function onSettingsChanged(runNow) {
   if (runNow) backgroundTick();
 }
 
-function saveDirs() {
-  renderDirs();
+function saveKits() {
+  renderKits();
   onSettingsChanged(true);
 }
 
-function renderDirs() {
-  el.settings.title = state.dirs.length
-    ? `Настройки (папок поиска: ${state.dirs.length})`
-    : "Настройки (папки поиска не заданы)";
-  const list = $("dirs-list");
+function renderKits() {
+  const dirs = searchDirs().length;
+  el.settings.title = dirs
+    ? `Настройки (комплектов для поиска: ${dirs})`
+    : "Настройки (комплекты для поиска не выбраны)";
+  $("root-path").textContent = state.root || "Корневая папка не задана";
+  $("root-path").title = state.root;
+  const list = $("kits-list");
   list.replaceChildren();
-  for (const dir of state.dirs) {
+  for (const name of state.subfolders) {
     const li = document.createElement("li");
-    const name = document.createElement("span");
-    name.textContent = dir;
-    name.title = dir;
-    const remove = document.createElement("button");
-    remove.textContent = "Удалить";
-    remove.addEventListener("click", () => {
-      state.dirs = state.dirs.filter((d) => d !== dir);
-      saveDirs();
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = state.kits.includes(name);
+    box.addEventListener("change", () => {
+      state.kits = box.checked
+        ? [...state.kits, name]
+        : state.kits.filter((k) => k !== name);
+      saveKits();
     });
-    li.append(name, remove);
+    label.append(box, " " + name);
+    label.title = name;
+    li.appendChild(label);
     list.appendChild(li);
   }
-  $("dirs-empty").hidden = state.dirs.length > 0;
+  const all = $("kits-all");
+  all.disabled = !state.subfolders.length;
+  all.checked = state.subfolders.length > 0 && state.subfolders.every((n) => state.kits.includes(n));
+  all.onchange = () => {
+    state.kits = all.checked ? [...state.subfolders] : [];
+    saveKits();
+  };
+  $("kits-empty").hidden = state.subfolders.length > 0;
+  $("kits-empty").textContent = state.root ? "В корневой папке нет вложенных папок." : "Выберите корневую папку.";
 }
 
 function openSettings() {
-  renderDirs();
+  renderKits();
   $("settings-popup").hidden = false;
 }
 
-async function onAddDir() {
+async function onChooseRoot() {
   const folder = await api().choose_folder();
-  if (!folder || state.dirs.includes(folder)) return;
-  state.dirs.push(folder);
-  saveDirs();
+  if (!folder || folder === state.root) return;
+  state.root = folder;
+  state.kits = [];
+  await loadSubfolders();
+  saveKits();
+}
+
+// ---------- Известные типы документов ----------
+
+const types = { selected: null, alias: null };
+
+function renderTypes() {
+  const known = $("types-known");
+  known.replaceChildren();
+  if (!state.knownTypes.includes(types.selected)) types.selected = null;
+  for (const name of state.knownTypes) {
+    const count = (state.typeAliases[name] || []).length;
+    known.appendChild(dictItem(count ? `${name} (${count})` : name, name === types.selected, () => {
+      types.selected = name;
+      types.alias = null;
+      $("types-name").value = name;
+      $("types-alias-name").value = "";
+      renderTypes();
+    }));
+  }
+  $("types-selected").textContent = types.selected ? `Алиасы: ${types.selected}` : "Алиасы";
+  const aliasList = $("types-alias");
+  aliasList.replaceChildren();
+  const aliases = types.selected ? state.typeAliases[types.selected] || [] : [];
+  if (!aliases.includes(types.alias)) types.alias = null;
+  for (const alias of aliases) {
+    aliasList.appendChild(dictItem(alias, alias === types.alias, () => {
+      types.alias = alias;
+      $("types-alias-name").value = alias;
+      renderTypes();
+    }));
+  }
+  const found = $("types-found");
+  found.replaceChildren();
+  const inDb = [...new Set(state.rows.map((r) => r.doc_type).filter(Boolean))]
+    .filter((t) => !state.knownTypes.includes(t)).sort((a, b) => a.localeCompare(b, "ru"));
+  for (const name of inDb) {
+    const count = state.rows.filter((r) => r.doc_type === name).length;
+    found.appendChild(dictItem(`${name} (${count})`, false, () => typesChange([...state.knownTypes, name])));
+  }
+}
+
+function typesChange(list) {
+  state.knownTypes = [...new Set(list)];
+  persistSettings();
+  renderTypes();
+  render();
+}
+
+function onTypeAdd() {
+  const name = dictValue("types-name").toUpperCase();
+  if (!name) return;
+  types.selected = name;
+  typesChange([...state.knownTypes, name]);
+}
+
+function onTypeRename() {
+  const name = dictValue("types-name").toUpperCase();
+  if (!types.selected || !name) return showError("Выберите тип в списке и введите новое имя в поле.");
+  const old = types.selected;
+  types.selected = name;
+  if (old !== name && state.typeAliases[old]) {
+    state.typeAliases[name] = [...new Set([...(state.typeAliases[name] || []), ...state.typeAliases[old]])];
+    delete state.typeAliases[old];
+  }
+  typesChange(state.knownTypes.map((t) => (t === old ? name : t)));
+}
+
+function aliasChange(list) {
+  if (!types.selected) return;
+  if (list.length) state.typeAliases[types.selected] = list;
+  else delete state.typeAliases[types.selected];
+  persistSettings();
+  renderTypes();
+}
+
+function onTypeAliasAdd() {
+  const text = dictValue("types-alias-name");
+  if (!types.selected) return showError("Сначала выберите известный тип в списке.");
+  if (!text) return;
+  const list = state.typeAliases[types.selected] || [];
+  if (list.some((a) => a.toLowerCase() === text.toLowerCase())) return;
+  types.alias = text;
+  aliasChange([...list, text]);
+}
+
+function onTypeAliasRename() {
+  const text = dictValue("types-alias-name");
+  if (!types.alias || !text) return showError("Выберите алиас в списке и введите новое написание в поле.");
+  const old = types.alias;
+  types.alias = text;
+  aliasChange([...new Set((state.typeAliases[types.selected] || []).map((a) => (a === old ? text : a)))]);
+}
+
+function onTypeAliasDelete() {
+  if (!types.alias) return;
+  const old = types.alias;
+  types.alias = null;
+  $("types-alias-name").value = "";
+  aliasChange((state.typeAliases[types.selected] || []).filter((a) => a !== old));
+}
+
+function onSearchByType() {
+  state.searchByType = $("chk-search-by-type").checked;
+  persistSettings();
+}
+
+function onTypeDelete() {
+  if (!types.selected) return;
+  const old = types.selected;
+  types.selected = null;
+  types.alias = null;
+  $("types-name").value = "";
+  delete state.typeAliases[old];
+  typesChange(state.knownTypes.filter((t) => t !== old));
+}
+
+function onHideUnknown() {
+  state.hideUnknown = $("chk-hide-unknown").checked;
+  if (state.hideUnknown) {
+    const visible = new Set(visibleRows().map((r) => r.id));
+    for (const id of [...state.selected]) if (!visible.has(id)) state.selected.delete(id);
+  }
+  persistSettings();
+  render();
+}
+
+function openTypes() {
+  $("types-name").value = "";
+  types.selected = null;
+  renderTypes();
+  $("types-popup").hidden = false;
+}
+
+// ---------- Фильтр папок поиска ----------
+
+const folders = { selected: null };
+
+function renderFolders() {
+  const list = $("folders-list");
+  list.replaceChildren();
+  const items = state.folderFilters || [];
+  if (!items.includes(folders.selected)) folders.selected = null;
+  for (const text of items) {
+    list.appendChild(dictItem(text, text === folders.selected, () => {
+      folders.selected = text;
+      $("folders-name").value = text;
+      renderFolders();
+    }));
+  }
+}
+
+function foldersChange(list) {
+  state.folderFilters = [...new Set(list)];
+  persistSettings();
+  renderFolders();
+}
+
+function onFolderAdd() {
+  const text = dictValue("folders-name");
+  if (!text) return;
+  const items = state.folderFilters || [];
+  if (items.some((t) => t.toLowerCase() === text.toLowerCase())) return;
+  folders.selected = text;
+  foldersChange([...items, text]);
+}
+
+function onFolderRename() {
+  const text = dictValue("folders-name");
+  if (!folders.selected || !text) return showError("Выберите подстроку в списке и введите новое написание в поле.");
+  const old = folders.selected;
+  folders.selected = text;
+  foldersChange((state.folderFilters || []).map((t) => (t === old ? text : t)));
+}
+
+function onFolderDelete() {
+  if (!folders.selected) return;
+  const old = folders.selected;
+  folders.selected = null;
+  $("folders-name").value = "";
+  foldersChange((state.folderFilters || []).filter((t) => t !== old));
+}
+
+function openFolders() {
+  $("folders-name").value = "";
+  folders.selected = null;
+  renderFolders();
+  $("folders-popup").hidden = false;
+}
+
+// ---------- Справочник заголовков ----------
+
+const dict = { data: null, selected: null, alias: null, ignored: null };
+
+function dictItem(text, selected, onClick) {
+  const li = document.createElement("li");
+  li.textContent = text;
+  if (selected) li.className = "selected";
+  li.addEventListener("click", onClick);
+  return li;
+}
+
+function renderDictionary() {
+  const data = dict.data;
+  if (!data.canonical.some((c) => c.name === dict.selected)) {
+    dict.selected = data.canonical.length ? data.canonical[0].name : null;
+  }
+  const canon = $("dict-canon");
+  canon.replaceChildren();
+  for (const c of data.canonical) {
+    const text = `${c.name} (${c.synonyms.length})` + (c.user_created ? " *" : "");
+    canon.appendChild(dictItem(text, c.name === dict.selected, () => {
+      dict.selected = c.name;
+      dict.alias = null;
+      $("dict-canon-name").value = c.name;
+      $("dict-alias-name").value = "";
+      renderDictionary();
+    }));
+  }
+  const current = data.canonical.find((c) => c.name === dict.selected);
+  $("dict-selected").textContent = current ? `Синонимы: ${current.name}` : "Синонимы";
+  const alias = $("dict-alias");
+  alias.replaceChildren();
+  const keys = current ? current.synonyms : [];
+  if (!keys.includes(dict.alias)) dict.alias = null;
+  for (const key of keys) {
+    const label = (current.labels && current.labels[key]) || key;
+    alias.appendChild(dictItem(label, key === dict.alias, () => {
+      dict.alias = key;
+      $("dict-alias-name").value = label;
+      renderDictionary();
+    }));
+  }
+  const ignored = $("dict-ignored");
+  ignored.replaceChildren();
+  if (!data.ignored.some((i) => i.key === dict.ignored)) dict.ignored = null;
+  for (const item of data.ignored) {
+    ignored.appendChild(dictItem(item.raw, item.key === dict.ignored, () => {
+      dict.ignored = item.key;
+      $("dict-ignored-name").value = item.raw;
+      renderDictionary();
+    }));
+  }
+}
+
+async function dictEdit(op, args) {
+  const result = await api().edit_dictionary(op, args);
+  if (result.status !== "ok") {
+    showError(result.message || "Не удалось изменить справочник");
+    return false;
+  }
+  dict.data = result;
+  renderDictionary();
+  return true;
+}
+
+async function openDictionary() {
+  const result = await api().get_dictionary();
+  if (result.status !== "ok") {
+    showError(result.message || "Не удалось прочитать справочник");
+    return;
+  }
+  dict.data = result;
+  renderDictionary();
+  $("dict-popup").hidden = false;
+}
+
+function dictValue(id) {
+  return $(id).value.trim();
+}
+
+// Имена
+async function onCanonAdd() {
+  const name = dictValue("dict-canon-name");
+  if (name && await dictEdit("add_canonical", { name })) {
+    dict.selected = name;
+    renderDictionary();
+  }
+}
+
+async function onCanonRename() {
+  const name = dictValue("dict-canon-name");
+  if (!dict.selected || !name) return showError("Выберите имя в списке и введите новое в поле.");
+  if (await dictEdit("rename_canonical", { old: dict.selected, new: name })) {
+    dict.selected = name;
+    renderDictionary();
+  }
+}
+
+async function onCanonDelete() {
+  if (!dict.selected) return;
+  if (!(await confirmDialog(`Удалить имя «${dict.selected}» и все его синонимы?`))) return;
+  if (await dictEdit("delete_canonical", { name: dict.selected })) $("dict-canon-name").value = "";
+}
+
+// Синонимы
+async function onAliasAdd() {
+  const text = dictValue("dict-alias-name");
+  if (!dict.selected || !text) return;
+  await dictEdit("add_alias", { canonical: dict.selected, text });
+}
+
+async function onAliasRename() {
+  const text = dictValue("dict-alias-name");
+  if (!dict.alias || !text) return showError("Выберите синоним в списке и введите новое написание в поле.");
+  await dictEdit("rename_alias", { key: dict.alias, canonical: dict.selected, text });
+}
+
+async function onAliasDelete() {
+  if (!dict.alias) return;
+  if (await dictEdit("remove_alias", { key: dict.alias })) {
+    dict.alias = null;
+    $("dict-alias-name").value = "";
+  }
+}
+
+// Игнорируемые заголовки
+async function onIgnoredAdd() {
+  const text = dictValue("dict-ignored-name");
+  if (text) await dictEdit("ignore", { text });
+}
+
+async function onIgnoredRename() {
+  const text = dictValue("dict-ignored-name");
+  if (!dict.ignored || !text) return showError("Выберите заголовок в списке и введите новое написание в поле.");
+  await dictEdit("rename_ignored", { key: dict.ignored, text });
+}
+
+async function onIgnoredDelete() {
+  if (!dict.ignored) return;
+  if (await dictEdit("unignore", { key: dict.ignored })) {
+    dict.ignored = null;
+    $("dict-ignored-name").value = "";
+  }
 }
 
 // ---------- Запуск ----------
@@ -629,14 +1221,42 @@ function bind() {
   el.stop.addEventListener("click", onStop);
   el.add.addEventListener("click", onAdd);
   el.save.addEventListener("click", onSave);
+  el.queries.addEventListener("click", onBuildQueries);
   el.hide.addEventListener("click", onHide);
   el.showHidden.addEventListener("click", onToggleHidden);
   el.exit.addEventListener("click", onExit);
   el.settings.addEventListener("click", openSettings);
-  $("btn-dir-add").addEventListener("click", onAddDir);
+  $("btn-root").addEventListener("click", onChooseRoot);
+  $("btn-types").addEventListener("click", openTypes);
+  $("btn-folders").addEventListener("click", openFolders);
+  $("folders-add").addEventListener("click", onFolderAdd);
+  $("folders-rename").addEventListener("click", onFolderRename);
+  $("folders-delete").addEventListener("click", onFolderDelete);
+  $("folders-close").addEventListener("click", () => { $("folders-popup").hidden = true; });
+  $("types-add").addEventListener("click", onTypeAdd);
+  $("types-rename").addEventListener("click", onTypeRename);
+  $("types-delete").addEventListener("click", onTypeDelete);
+  $("types-alias-add").addEventListener("click", onTypeAliasAdd);
+  $("types-alias-rename").addEventListener("click", onTypeAliasRename);
+  $("types-alias-delete").addEventListener("click", onTypeAliasDelete);
+  $("chk-search-by-type").addEventListener("change", onSearchByType);
+  $("types-close").addEventListener("click", () => { $("types-popup").hidden = true; });
+  $("chk-hide-unknown").addEventListener("change", onHideUnknown);
   $("btn-clear-db").addEventListener("click", onClearDb);
+  $("btn-dictionary").addEventListener("click", openDictionary);
+  $("dict-canon-add").addEventListener("click", onCanonAdd);
+  $("dict-canon-rename").addEventListener("click", onCanonRename);
+  $("dict-canon-delete").addEventListener("click", onCanonDelete);
+  $("dict-alias-add").addEventListener("click", onAliasAdd);
+  $("dict-alias-rename").addEventListener("click", onAliasRename);
+  $("dict-alias-delete").addEventListener("click", onAliasDelete);
+  $("dict-ignored-add").addEventListener("click", onIgnoredAdd);
+  $("dict-ignored-rename").addEventListener("click", onIgnoredRename);
+  $("dict-ignored-delete").addEventListener("click", onIgnoredDelete);
+  $("dict-close").addEventListener("click", () => { $("dict-popup").hidden = true; });
   $("settings-close").addEventListener("click", () => { $("settings-popup").hidden = true; });
   el.selectAll.addEventListener("click", toggleAll);
+$("btn-toggle-tree").addEventListener("click", toggleTree);
   el.chkAll.addEventListener("change", toggleAll);
   el.filter.addEventListener("input", () => { state.filter = el.filter.value; saveUi(); render(); });
   $("error-close").addEventListener("click", () => { $("error-popup").hidden = true; });
@@ -658,7 +1278,7 @@ async function init() {
   try {
     console.log("ping:", await api().ping());
     await loadSettings();
-    renderDirs();
+    renderKits();
     await refresh();
     await poll();
     scheduleBackground();

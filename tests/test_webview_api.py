@@ -98,6 +98,33 @@ def test_clear_database_removes_records_and_csv(tmp_path):
     assert ctl.get_files() == {"files": [], "found": []}
 
 
+def test_open_csv_opens_saved_csv_files(tmp_path):
+    from core import database
+
+    ctl = _controller(tmp_path)
+    first = tmp_path / "a.docx"
+    first.write_bytes(b"abc")
+    ctl.add_files([str(first)])
+    file_id = ctl.get_files()["files"][0]["id"]
+    opened = []
+    assert ctl.open_csv(file_id, opened.append)["status"] == "error"
+    one = tmp_path / "one.csv"
+    one.write_text("a", encoding="utf-8")
+    connection = database.init_db(ctl.db_path)
+    database.update_file_status(
+        connection, file_id, "SAVED", csv_path=f"{one};{tmp_path / 'gone.csv'}")
+    connection.close()
+    result = ctl.open_csv(file_id, opened.append)
+    assert result["status"] == "ok"
+    assert opened == [str(one)]
+    assert ctl.open_csv(9999, opened.append)["status"] == "error"
+
+
+def test_api_open_csv_delegates(monkeypatch):
+    monkeypatch.setattr(controller, "open_csv", lambda file_id: {"id": file_id})
+    assert Api().open_csv(5) == {"id": 5}
+
+
 def test_api_new_methods_delegate(monkeypatch):
     calls = []
     monkeypatch.setattr(controller, "hide_files", lambda ids: calls.append(("hide", ids)) or {})

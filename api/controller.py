@@ -7,13 +7,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
 from collections.abc import Iterable
 from typing import Any
 
-from core import database, exports
+from core import database, exports, header_dictionary, kits, query_builder
 from core.statuses import FileStatus
 from core.search.manager import SearchManager
 from core.search.registrar import FileRegistrar
@@ -40,6 +41,8 @@ class Controller:
         directories: Iterable[str] | str,
         mask: str = "*",
         background_mode: bool = True,
+        name_words: Iterable[str] | None = None,
+        folder_filters: Iterable[str] | None = None,
     ) -> dict[str, Any]:
         if isinstance(directories, str):
             directories = [directories]
@@ -48,7 +51,10 @@ class Controller:
             return {"status": "error", "message": "Не указаны папки для поиска"}
         with self._lock:
             self.registrar.clear()
-            started = self.search.start_search(directories, mask or "*", on_file=self.registrar)
+            started = self.search.start_search(
+                directories, mask or "*", on_file=self.registrar, name_words=name_words,
+                folder_filters=folder_filters,
+            )
             if started:
                 self._started_at = time.monotonic()
         if not started:
@@ -80,6 +86,12 @@ class Controller:
         found = self.registrar.get_items()
         for item in rows:
             item.update(_file_stat(item.get("path")))
+            try:
+                meta = json.loads(item.get("meta_json") or "{}")
+            except ValueError:
+                meta = {}
+            item["revision_date_source"] = meta.get("revision_date_source", "")
+            item.update(kits.kit_info(item))
         for item in found:
             item.update(_file_stat(item.get("path")))
             item["filename"] = os.path.basename(item.get("path") or "")
@@ -97,13 +109,125 @@ class Controller:
                 errors.append(f"{path}: {exc}")
         return {"status": "ok", "added": added, "errors": errors}
 
-    def process_selected(self, file_ids: list[int]) -> dict[str, Any]:
-        """«Сохранить»: фоновый разбор выбранных файлов."""
+    def check_kits(self, file_ids: list[int]) -> dict[str, Any]:
+        """Перед «Сохранить»: документы, не принадлежащие своему комплекту."""
+        connection = database.init_db(self.db_path)
+        try:
+            rows = [
+                row
+                for row in (database.get_file_by_id(connection, int(i)) for i in file_ids or [])
+                if row
+            ]
+        finally:
+            connection.close()
+        return {"status": "ok", "conflicts": kits.check_kits(rows)}
+
+    def process_selected(
+        self, file_ids: list[int], force_ids: Iterable[int] | None = None
+    ) -> dict[str, Any]:
+        """«Сохранить»: фоновый разбор выбранных файлов.
+
+        `force_ids` — документы, которые пользователь принял в комплект вручную:
+        они получают `meta_json.kit_forced` и помечаются в списке.
+        """
+        force = {int(i) for i in force_ids or []}
+        if force:
+            connection = database.init_db(self.db_path)
+            try:
+                for file_id in force:
+                    database.update_file_meta_by_id(connection, file_id, {"kit_forced": True})
+            finally:
+                connection.close()
         return {"status": "started", "queued": self.tasks.save_files(file_ids)}
 
     def prepare_selected(self, file_ids: list[int] | None = None) -> dict[str, Any]:
         """«Подготовить»: маппинг актуальных SAVED-файлов."""
         return {"status": "started", "queued": self.tasks.prepare_files(file_ids)}
+
+    def build_queries(self, file_ids: list[int], opener=None) -> dict[str, Any]:
+        """«Сформировать запросы»: копия шаблона по типу с таблицей CSV выбранных файлов."""
+        if not file_ids:
+            return {"status": "error", "message": "Не выбрано ни одного файла"}
+        try:
+            result = query_builder.build_queries(file_ids, self.db_path)
+        except query_builder.QueryBuildError as exc:
+            return {"status": "error", "message": str(exc)}
+        if not result["books"]:
+            reasons = "; ".join(sorted({s["reason"] for s in result["skipped"]})) or "нет подходящих файлов"
+            return {"status": "error", "message": "Запросы не сформированы: " + reasons, **result}
+        opener = opener or _open_in_system
+        for book in result["books"]:
+            try:
+                opener(book["path"])
+            except OSError:
+                pass  # книга создана; не открылась — путь есть в ответе
+        return {"status": "ok", **result}
+
+    def check_headers(self, file_ids: list[int]) -> dict[str, Any]:
+        """Перед «Сформировать запросы»: заголовки CSV без канонической роли."""
+        result = query_builder.analyze_headers(file_ids, self.db_path)
+        return {"status": "ok", **result}
+
+    def apply_header_decisions(self, decisions: list[dict[str, Any]]) -> dict[str, Any]:
+        """Решения по заголовкам: assign (role), new (role), ignore (навсегда), skip (ничего)."""
+        done, errors = 0, []
+        connection = database.init_db(self.db_path)
+        try:
+            for item in decisions or []:
+                header, action = item.get("header") or "", item.get("action")
+                role = (item.get("role") or "").strip()
+                try:
+                    if action == "assign":
+                        header_dictionary.set_alias(connection, role, header)
+                    elif action == "new":
+                        role = header_dictionary.add_canonical(connection, role or header)
+                        header_dictionary.set_alias(connection, role, header)
+                    elif action == "ignore":
+                        header_dictionary.ignore_header(connection, header)
+                    elif action != "skip":
+                        continue
+                    done += action != "skip"
+                except header_dictionary.DictionaryError as exc:
+                    errors.append(f"{header}: {exc}")
+        finally:
+            connection.close()
+        return {"status": "error" if errors else "ok", "applied": done, "errors": errors,
+                "message": "; ".join(errors)}
+
+    def get_dictionary(self) -> dict[str, Any]:
+        connection = database.init_db(self.db_path)
+        try:
+            return {"status": "ok", **header_dictionary.list_dictionary(connection)}
+        finally:
+            connection.close()
+
+    def edit_dictionary(self, op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Правка справочника: add_alias, remove_alias, add_canonical, rename_canonical,
+        delete_canonical, unignore."""
+        args = args or {}
+        hd = header_dictionary
+        operations = {
+            "add_alias": lambda c: hd.set_alias(c, args.get("canonical", ""), args.get("text", "")),
+            "remove_alias": lambda c: hd.remove_alias(c, args.get("key", "")),
+            "add_canonical": lambda c: hd.add_canonical(c, args.get("name", "")),
+            "rename_canonical": lambda c: hd.rename_canonical(c, args.get("old", ""), args.get("new", "")),
+            "delete_canonical": lambda c: hd.delete_canonical(c, args.get("name", "")),
+            "unignore": lambda c: hd.unignore_header(c, args.get("key", "")),
+            "ignore": lambda c: hd.ignore_header(c, args.get("text", "")),
+            "rename_alias": lambda c: hd.rename_alias(
+                c, args.get("key", ""), args.get("canonical", ""), args.get("text", "")),
+            "rename_ignored": lambda c: hd.rename_ignored(c, args.get("key", ""), args.get("text", "")),
+        }
+        if op not in operations:
+            return {"status": "error", "message": f"Неизвестная операция: {op}"}
+        connection = database.init_db(self.db_path)
+        try:
+            operations[op](connection)
+        except header_dictionary.DictionaryError as exc:
+            return {"status": "error", "message": str(exc)}
+        finally:
+            connection.close()
+        return self.get_dictionary()
 
     def stop_tasks(self) -> dict[str, Any]:
         self.tasks.stop()
@@ -141,6 +265,36 @@ class Controller:
             connection.close()
         return {"status": "ok", "changed": changed}
 
+    def open_csv(self, file_id: int, opener=None) -> dict[str, Any]:
+        """Временное решение: двойной щелчок по сохранённому файлу открывает его CSV."""
+        opener = opener or _open_in_system
+        connection = database.init_db(self.db_path)
+        try:
+            row = database.get_file_by_id(connection, int(file_id))
+        finally:
+            connection.close()
+        joined = (row or {}).get("csv_path") or ""
+        paths = [p.strip() for p in str(joined).split(";") if p.strip()]
+        if not paths:
+            return {"status": "error", "message": "У файла нет сохранённого CSV"}
+        existing = [p for p in paths if os.path.isfile(p)]
+        if not existing:
+            return {"status": "error", "message": "CSV не найден на диске: " + paths[0]}
+        for path in existing:
+            opener(os.path.abspath(path))
+        return {"status": "ok", "opened": existing}
+
+    def open_document(self, path: str, opener=None) -> dict[str, Any]:
+        """Открывает исходный документ (.doc/.docx) в Word (программа по умолчанию)."""
+        opener = opener or _open_in_system
+        path = str(path or "")
+        if not path.lower().endswith((".doc", ".docx")):
+            return {"status": "error", "message": "Это не документ Word: " + path}
+        if not os.path.isfile(path):
+            return {"status": "error", "message": "Файл не найден: " + path}
+        opener(os.path.abspath(path))
+        return {"status": "ok", "opened": path}
+
     def clear_database(self) -> dict[str, Any]:
         """Удаляет все записи о файлах и все CSV этой БД.
 
@@ -176,6 +330,17 @@ class Controller:
         return {"status": "ok", "records": removed, "csv_deleted": deleted}
 
 
+def _open_in_system(path: str) -> None:
+    """Открывает файл программой по умолчанию (Windows, macOS, Linux)."""
+    if hasattr(os, "startfile"):
+        os.startfile(path)  # type: ignore[attr-defined]
+    else:
+        import subprocess
+        import sys
+
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", path])
+
+
 def _file_stat(path: str | None) -> dict[str, Any]:
     """Размер и время изменения файла на диске (None, если файла нет)."""
     try:
@@ -191,6 +356,20 @@ _default: Controller | None = None
 _default_lock = threading.Lock()
 
 
+def list_subfolders(root: str) -> dict[str, Any]:
+    """Папки первого уровня корневой папки: из них пользователь выбирает комплекты."""
+    if not root or not os.path.isdir(root):
+        return {"status": "error", "message": "Корневая папка не найдена", "folders": []}
+    try:
+        names = sorted(
+            (n for n in os.listdir(root) if os.path.isdir(os.path.join(root, n)) and not n.startswith(".")),
+            key=str.casefold,
+        )
+    except OSError as exc:
+        return {"status": "error", "message": str(exc), "folders": []}
+    return {"status": "ok", "folders": names}
+
+
 def get_controller() -> Controller:
     global _default
     with _default_lock:
@@ -201,8 +380,13 @@ def get_controller() -> Controller:
         return _default
 
 
-def start_search(directories, mask: str = "*", background_mode: bool = True) -> dict[str, Any]:
-    return get_controller().start_search(directories, mask, background_mode)
+def start_search(
+    directories, mask: str = "*", background_mode: bool = True, name_words=None,
+    folder_filters=None,
+) -> dict[str, Any]:
+    return get_controller().start_search(
+        directories, mask, background_mode, name_words, folder_filters
+    )
 
 
 def stop_search() -> dict[str, Any]:
@@ -237,9 +421,41 @@ def clear_database() -> dict[str, Any]:
     return get_controller().clear_database()
 
 
-def process_selected(file_ids: list[int]) -> dict[str, Any]:
-    return get_controller().process_selected(file_ids)
+def open_csv(file_id) -> dict[str, Any]:
+    return get_controller().open_csv(file_id)
+
+
+def open_document(path) -> dict[str, Any]:
+    return get_controller().open_document(path)
+
+
+def process_selected(file_ids: list[int], force_ids=None) -> dict[str, Any]:
+    return get_controller().process_selected(file_ids, force_ids)
+
+
+def check_kits(file_ids: list[int]) -> dict[str, Any]:
+    return get_controller().check_kits(file_ids)
 
 
 def prepare_selected(file_ids: list[int] | None = None) -> dict[str, Any]:
     return get_controller().prepare_selected(file_ids)
+
+
+def build_queries(file_ids: list[int]) -> dict[str, Any]:
+    return get_controller().build_queries(file_ids)
+
+
+def check_headers(file_ids: list[int]) -> dict[str, Any]:
+    return get_controller().check_headers(file_ids)
+
+
+def apply_header_decisions(decisions) -> dict[str, Any]:
+    return get_controller().apply_header_decisions(decisions)
+
+
+def get_dictionary() -> dict[str, Any]:
+    return get_controller().get_dictionary()
+
+
+def edit_dictionary(op: str, args=None) -> dict[str, Any]:
+    return get_controller().edit_dictionary(op, args)

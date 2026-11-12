@@ -30,21 +30,21 @@
       <button id="btn-save" class="icon accent" title="Сохранить выделенные файлы" disabled>
         <svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v6h8V3M7 21v-7h10v7"/></svg>
       </button>
+      <button id="btn-queries" class="icon primary" title="Сформировать запросы: копия шаблона Power Query со списком CSV выделенных файлов" disabled>
+        <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M8 13h8M8 17h8"/></svg>
+      </button>
       <button id="btn-exit" class="icon danger" title="Выход">
         <svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>
       </button>
     </div>
     <label class="inline" title="Поиск идёт в фоне, окно остаётся доступным"><input type="checkbox" id="chk-background" checked> Фоновый режим</label>
     <input type="search" id="input-filter" placeholder="Фильтр…" title="Фильтр по таблице">
+    <button id="btn-toggle-tree" class="icon small" title="Развернуть дерево">
+      <svg viewBox="0 0 24 24"><path d="M7 8l5-5 5 5M7 16l5 5 5-5"/></svg>
+    </button>
     <button id="btn-select-all" class="icon small" title="Выделить все">
       <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg>
     </button>
-    <label class="inline" title="Структура дерева записей">Дерево:
-      <select id="select-tree">
-        <option value="type-section">Тип документа → Код раздела</option>
-        <option value="section-type">Код раздела → Тип документа</option>
-      </select>
-    </label>
   </header>
 
   <main class="grid-wrap">
@@ -79,18 +79,132 @@
 
   <div id="settings-popup" class="popup" hidden>
     <div class="popup-body">
-      <div class="popup-title settings-title">Настройки: папки поиска</div>
-      <ul id="dirs-list" class="dirs-list"></ul>
-      <div id="dirs-empty" class="muted">Папок нет. Добавьте хотя бы одну.</div>
+      <div class="popup-title settings-title">Настройки: комплекты для поиска</div>
+      <div class="root-row">
+        <span id="root-path" class="root-path"></span>
+        <button id="btn-root" title="Корневая папка, внутри которой лежат папки комплектов (шифров)">Корневая папка…</button>
+      </div>
+      <div class="dict-head">Комплекты (папки первого уровня)</div>
+      <label class="kits-all"><input type="checkbox" id="kits-all"> Выбрать все комплекты</label>
+      <ul id="kits-list" class="dirs-list kits-list"></ul>
+      <div id="kits-empty" class="muted">Выберите корневую папку.</div>
       <label class="interval-row" title="Как часто повторять поиск при включённом фоновом режиме">
         Периодичность фонового поиска, мин:
         <input type="number" id="input-interval" min="1" max="1440" step="1" value="60">
       </label>
       <div class="popup-actions settings-actions">
-        <button id="btn-dir-add">Добавить папку…</button>
+        <button id="btn-types" title="Известные типы документов и скрытие неизвестных">Типы документов…</button>
+        <button id="btn-folders" title="В каких вложенных папках искать документы">Фильтр папок…</button>
+        <button id="btn-dictionary" title="Канонические заголовки, синонимы и игнорируемые заголовки">Справочник заголовков…</button>
         <button id="btn-clear-db" class="danger-btn" title="Удалить все записи о файлах и все CSV">Очистить базу данных</button>
         <button id="settings-close" class="primary">Закрыть</button>
       </div>
+    </div>
+  </div>
+
+  <div id="folders-popup" class="popup" hidden>
+    <div class="popup-body">
+      <div class="popup-title settings-title">Фильтр папок для поиска</div>
+      <div class="muted">Внутри папки комплекта поиск идёт только во вложенных папках, в названии которых есть одна из подстрок (регистр и пробелы не важны: «Ред. формат» = «Ред.формат»). Файлы прямо в папке комплекта берутся всегда. Пустой список — искать во всех вложенных папках.</div>
+      <div class="dict-head">Искать в папках</div>
+      <ul id="folders-list" class="dict-list"></ul>
+      <div class="dict-row">
+        <input type="text" id="folders-name" placeholder="Подстрока, например Изм1">
+        <button id="folders-add" class="icon-btn" title="Добавить подстроку">＋</button>
+        <button id="folders-rename" class="icon-btn" title="Переименовать выбранную подстроку">✎</button>
+        <button id="folders-delete" class="icon-btn danger-btn" title="Удалить выбранную подстроку">🗑</button>
+      </div>
+      <div class="popup-actions"><button id="folders-close" class="primary">Закрыть</button></div>
+    </div>
+  </div>
+
+  <div id="types-popup" class="popup" hidden>
+    <div class="popup-body wide">
+      <div class="popup-title settings-title">Известные типы документов</div>
+      <div class="dict-layout types-layout">
+        <div class="dict-col">
+          <div class="dict-head">Известные типы</div>
+          <ul id="types-known" class="dict-list"></ul>
+          <div class="dict-row">
+            <input type="text" id="types-name" placeholder="Тип">
+            <button id="types-add" class="icon-btn" title="Добавить тип">＋</button>
+            <button id="types-rename" class="icon-btn" title="Переименовать выбранный тип">✎</button>
+            <button id="types-delete" class="icon-btn danger-btn" title="Убрать выбранный тип из известных">🗑</button>
+          </div>
+        </div>
+        <div class="dict-col">
+          <div class="dict-head" id="types-selected">Алиасы</div>
+          <ul id="types-alias" class="dict-list"></ul>
+          <div class="dict-row">
+            <input type="text" id="types-alias-name" placeholder="Алиас">
+            <button id="types-alias-add" class="icon-btn" title="Добавить алиас выбранному типу">＋</button>
+            <button id="types-alias-rename" class="icon-btn" title="Переименовать выбранный алиас">✎</button>
+            <button id="types-alias-delete" class="icon-btn danger-btn" title="Удалить выбранный алиас">🗑</button>
+          </div>
+        </div>
+        <div class="dict-col">
+          <div class="dict-head">Типы в базе (щелчок — сделать известным)</div>
+          <ul id="types-found" class="dict-list"></ul>
+        </div>
+      </div>
+      <label class="interval-row" title="В списке остаются только документы известных типов">
+        <input type="checkbox" id="chk-hide-unknown"> Не отображать неизвестные документы
+      </label>
+      <label class="interval-row" title="При поиске сразу отбрасываются файлы, в имени которых нет типа или его алиаса">
+        <input type="checkbox" id="chk-search-by-type"> Искать, используя тип и алиасы (имя файла должно содержать тип или алиас)
+      </label>
+      <div class="popup-actions"><button id="types-close" class="primary">Закрыть</button></div>
+    </div>
+  </div>
+
+  <div id="headers-popup" class="popup" hidden>
+    <div class="popup-body wide">
+      <div class="popup-title settings-title">Заголовки без канонической роли</div>
+      <div class="muted">Решения запоминаются. «Пропустить» действует один раз: колонка останется под своим именем и вопрос повторится. «Игнорировать» запоминается навсегда (список правится в справочнике).</div>
+      <div id="headers-list" class="headers-list"></div>
+      <div class="popup-actions">
+        <button id="headers-cancel">Отмена</button>
+        <button id="headers-apply" class="primary">Применить и сформировать</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="dict-popup" class="popup" hidden>
+    <div class="popup-body wide">
+      <div class="popup-title settings-title">Справочник заголовков</div>
+      <div class="dict-layout">
+        <div class="dict-col">
+          <div class="dict-head">Канонические имена</div>
+          <ul id="dict-canon" class="dict-list"></ul>
+          <div class="dict-row">
+            <input type="text" id="dict-canon-name" placeholder="Имя">
+            <button id="dict-canon-add" class="icon-btn" title="Добавить имя">＋</button>
+            <button id="dict-canon-rename" class="icon-btn" title="Переименовать выбранное имя">✎</button>
+            <button id="dict-canon-delete" class="icon-btn danger-btn" title="Удалить выбранное имя со всеми синонимами">🗑</button>
+          </div>
+        </div>
+        <div class="dict-col">
+          <div class="dict-head" id="dict-selected">Синонимы</div>
+          <ul id="dict-alias" class="dict-list"></ul>
+          <div class="dict-row">
+            <input type="text" id="dict-alias-name" placeholder="Имя">
+            <button id="dict-alias-add" class="icon-btn" title="Добавить синоним выбранному имени">＋</button>
+            <button id="dict-alias-rename" class="icon-btn" title="Переименовать выбранный синоним">✎</button>
+            <button id="dict-alias-delete" class="icon-btn danger-btn" title="Удалить выбранный синоним">🗑</button>
+          </div>
+        </div>
+        <div class="dict-col">
+          <div class="dict-head">Игнорируемые заголовки</div>
+          <ul id="dict-ignored" class="dict-list"></ul>
+          <div class="dict-row">
+            <input type="text" id="dict-ignored-name" placeholder="Имя">
+            <button id="dict-ignored-add" class="icon-btn" title="Добавить заголовок в игнорируемые">＋</button>
+            <button id="dict-ignored-rename" class="icon-btn" title="Переименовать выбранный заголовок">✎</button>
+            <button id="dict-ignored-delete" class="icon-btn danger-btn" title="Убрать выбранный заголовок из игнорируемых">🗑</button>
+          </div>
+        </div>
+      </div>
+      <div class="popup-actions"><button id="dict-close" class="primary">Закрыть</button></div>
     </div>
   </div>
 

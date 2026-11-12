@@ -75,6 +75,7 @@ th.sorted-asc::after { content: " ▲"; font-size: 10px; }
 th.sorted-desc::after { content: " ▼"; font-size: 10px; }
 .col-check { cursor: default; text-align: center; }
 td.path { color: #7b8794; font-size: 12px; }
+tbody tr:not(.group) td:not(.col-check) { user-select: text; -webkit-user-select: text; cursor: text; }
 tbody tr:hover { background: #f0f4f8; }
 tbody tr.selected { background: #e3f0ff; }
 tbody tr.hidden-file { color: #7b8794; background: #f5f0e6; }
@@ -84,6 +85,9 @@ tbody tr.group { cursor: pointer; font-weight: 600; user-select: none; }
 tbody tr.group.level-1 { background: #d9e2ec; }
 tbody tr.group.level-2 { background: #eef2f6; }
 tbody tr.group.level-2 td:nth-child(2) { padding-left: 28px; }
+tbody tr.group.level-3 { background: #f7f9fb; }
+tbody tr.group.level-3 td:nth-child(2) { padding-left: 52px; }
+tbody tr.kit-problem { box-shadow: inset 4px 0 0 #e5534b; }
 tbody tr.group:hover { background: #cfdbe8; }
 .empty { padding: 40px; text-align: center; color: #7b8794; }
 
@@ -94,9 +98,15 @@ tbody tr.group:hover { background: #cfdbe8; }
 .popup-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 .settings-title { color: #243b53; }
 .settings-actions { justify-content: space-between; }
+.root-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.root-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #243b53; }
+.kits-list li { justify-content: flex-start; cursor: pointer; }
+.types-layout { height: 40vh; }
 .interval-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .interval-row input { width: 80px; }
 .confirm-text { font-size: 15px; white-space: pre-line; }
+.popup-body, .popup-body pre, .confirm-text, #error-text { user-select: text; -webkit-user-select: text; cursor: text; }
+.popup-body button, .popup-body label { user-select: none; cursor: pointer; }
 
 /* Бейджи статусов */
 .badge { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; }
@@ -123,3 +133,22 @@ tbody tr.group:hover { background: #cfdbe8; }
 .popup-body.small { max-width: 420px; }
 .popup-title { font-weight: 600; margin-bottom: 8px; color: #eb5757; }
 .popup-body pre { white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow: auto; background: #f4f6f8; padding: 8px; border-radius: 4px; }
+.popup-body.wide { max-width: 980px; max-height: 90vh; overflow: auto; }
+.headers-list { max-height: 50vh; overflow: auto; margin: 8px 0; }
+.header-item { border-bottom: 1px solid #e3e7eb; padding: 6px 0; }
+.header-title { font-weight: 600; }
+.header-warn { color: #eb5757; }
+.header-item select, .header-item input[type=text] { margin-right: 6px; }
+.dict-layout { display: flex; gap: 12px; height: 55vh; }
+.dict-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.dict-head { font-weight: 600; margin: 8px 0 4px; }
+.dict-list { list-style: none; margin: 0; padding: 0; flex: 1 1 0; min-height: 0; overflow-x: hidden; overflow-y: auto; border: 1px solid #e3e7eb; border-radius: 4px; }
+.dict-list li { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; padding: 3px 6px; cursor: default; }
+.dict-list li span { min-width: 0; overflow-wrap: anywhere; }
+.dict-list li button { flex: none; }
+#dict-canon li { cursor: pointer; }
+.dict-list li.selected { background: #dbe8ff; }
+.dict-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.dict-row input[type=text] { flex: 1; min-width: 0; }
+.dict-row { flex-wrap: nowrap; }
+.icon-btn { flex: none; width: 32px; padding: 4px 0; text-align: center; }

@@ -81,6 +81,20 @@ python -X utf8 scripts/check_volumes_docx.py "data/queries/СО_….xlsx"   # CS
 
 Первый сравнивает суммы по файлу и по каждому NПП (свёртка повторов даёт меньше строк, но суммы равны). Второй берёт документ по хэшу из имени CSV (`files.hash`), определяет колонку количества по тексту шапки Word и сверяет сумму каждой таблицы; невыгруженные таблицы и таблицы без колонки количества попадают в отчёт. Отчёты: `data/exports/_report_volumes.tsv`, `data/exports/_report_volumes_docx.tsv`. Если нет кэша конвертации, второй скрипт откроет Word.
 
+### pq_refresh_check.ps1 и pq_eval.ps1 (проверка запросов в настоящем Excel)
+
+Работают через COM со скрытым Excel на **копии** книги (исходная не меняется). Нужен установленный Excel; книга не должна требовать диалогов.
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pq_refresh_check.ps1 -Workbook "data\queries\СО_….xlsx" -OutDir data\exports\_pq_check
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pq_eval.ps1 -Workbook "книга.xlsx" -FormulaFile формула.m -OutFile результат.txt
+```
+
+- `pq_refresh_check.ps1` обновляет таблицы запросов по одной (итоговая, самая большая, последней; ~100 с для 89 CSV), пишет `_refresh_log.txt` с текстом ошибки каждого запроса, выгружает таблицы в `<имя>.txt` (UTF-16, табуляция, текстовый формат) и сохраняет `refreshed.xlsx` для `check_volumes.py`. Код возврата 1 при ошибках.
+- `pq_eval.ps1` вычисляет одну M-формулу из UTF-8 файла со всеми запросами книги и выгружает таблицу. Для текста ошибки оберните шаг в `try` и верните `Message` таблицей: сам сбой даёт только код 0x800A03EC.
+- Оба включают `Queries.FastCombine` (игнорировать уровни конфиденциальности): книга после `pq_sync import` имеет пустую привязку разрешений, и без этого запросы падают с «ссылается на другие запросы или этапы…». Перед работой `pq_refresh_check.ps1` пересохраняет копию в Excel, чтобы привязка была настоящей.
+- Файлы `.ps1` без кириллицы в тексте: Windows PowerShell 5 читает их как ANSI.
+
 ### dump_table_head.py
 Первые строки сырых таблиц файлов или папок (`.doc`, `.docx`), без разбора шапки. Отчёт `table_heads.xlsx`: лист на файл (полный текст ячеек) и лист «Итог».
 

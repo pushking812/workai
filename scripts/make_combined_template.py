@@ -3,8 +3,9 @@
 Общая книга: запросы ВОР (как в шаблоне ВОР) + запросы СО (код из `PQ/СО/запросы/` под префиксом `СО_`)
 + запросы сверки из `PQ/Общая/запросы/`. Листы:
 - `СписокВОР`, `СписокСО` (списки CSV, строки пишет приложение);
-- `ФайлBinary` (ВОР) и `СО_ФайлBinary` (СО) - итоговые таблицы запросов;
+- `Справочники` (исходная таблица справочника колонок);
 - `Пересечение`, `Только_в_СО`, `Только_в_ВОР`, `Связь_ВОР_СО` - таблицы сверки.
+Остальные запросы (ФайлBinary, СО_ФайлBinary, Prefix и т.д.) листов не имеют.
 Справочник колонок СО зашит в запрос `СО_СправочникКолонок` (роли и варианты - из make_so_template.py).
 
 Запуск (нужны пакеты проекта, например из venv): `python -I -X utf8 scripts/make_combined_template.py`.
@@ -49,7 +50,6 @@ SO_REF = ["ИмяФайла", "Таблица", "Строка", "Раздел", 
 
 # Новые таблицы запросов (лист и таблица называются как запрос): имя -> (столбцы, ширины)
 QUERY_SHEETS: dict[str, tuple[list[str], list[int]]] = {
-    "СО_ФайлBinary": (SO_COLUMNS, [46, 14, 14, 12, 50, 9, 8, 50, 40, 22, 18, 40, 30, 18, 18, 12, 12, 12, 30, 60, 60]),
     "Пересечение": (["ШифрПроекта", "НомИзмПроекта", "ДатаИзм", "NППСО", "СО_Наименование", "СтрокВОР", "СтрокСО", "КлючСО"],
                     [28, 14, 12, 12, 60, 10, 10, 60]),
     "Только_в_СО": (["ИдСтроки", "ШифрПроекта", "НомИзмПроекта", "ДатаИзм", "ИмяФайла", "Таблица", "Строка", "Раздел", "Комплект",
@@ -63,8 +63,11 @@ QUERY_SHEETS: dict[str, tuple[list[str], list[int]]] = {
                       *("СО_" + c for c in SO_REF)],
                      [46, 28, 14, 12, 50, 9, 8, 50, 10, 60, 10, 10, 20, 12, 60,
                       50, 9, 8, 40, 12, 10, 60, 10, 10, 30]),
-    "Связь_Вид": (["Пункт", "Наименование", "КолВо", "ЕдИзм"], [14, 90, 12, 10]),
 }
+# Промежуточные запросы: на лист не загружаются (только соединение), чтобы не плодить листы
+CONNECTION_ONLY = ["СО_ФайлBinary"]
+# Листы шаблона ВОР, которые в общей книге не нужны (запросы остаются соединениями)
+DROP_SHEETS = ["СправочникКолонок", "Prefix", "СписокФайлов", "ЗадатьДиректорию", "РабочаяДиректория", "ФайлBinary"]
 LIST_SHEET = "СписокСО"
 # Порядок листов в книге: имя -> после какого листа вставить
 INSERT_AFTER = {LIST_SHEET: "СписокВОР"}
@@ -156,24 +159,36 @@ def build() -> None:
     sheet1 = re.sub(r' topLeftCell="[^"]*"', "", sheet1)
     sheet1 = re.sub(r'<selection\b[^>]*/>', '<selection activeCell="A1" sqref="A1"/>', sheet1)
     files["xl/worksheets/sheet1.xml"] = sheet1.encode("utf-8")
-    files["xl/worksheets/sheet6.xml"] = re.sub(
-        r'<row r="2"[^>]*?(?:/>|>.*?</row>)', '<row r="2" spans="1:1"/>', text("xl/worksheets/sheet6.xml"),
-        count=1, flags=re.DOTALL).encode("utf-8")
 
-    # --- ФайлBinary (ВОР): шапка по колонкам запроса, без строк данных и итоговой строки ---
-    n = len(VOR_COLUMNS)
-    last = qb._col_letter(n - 1)
-    sheet9 = text("xl/worksheets/sheet9.xml")
-    widths = [46, 28, 14, 12, 50, 9, 8, 10, 12, 60, 10, 10, 20, 16, 16, 30, 50, 60]
-    sheet9 = re.sub(r"<cols>.*?</cols>", lambda _m: _cols(widths), sheet9, count=1, flags=re.DOTALL)
-    sheet9 = re.sub(r"<sheetData>.*?</sheetData>",
-                    lambda _m: f'<sheetData>{_row(1, VOR_COLUMNS)}<row r="2" spans="1:{n}"/></sheetData>',
-                    sheet9, count=1, flags=re.DOTALL)
-    sheet9 = re.sub(r'<dimension\b[^>]*/>', f'<dimension ref="A1:{last}2"/>', sheet9, count=1)
-    sheet9 = re.sub(r'<selection\b[^>]*/>', '<selection activeCell="A1" sqref="A1"/>', sheet9)
-    files["xl/worksheets/sheet9.xml"] = sheet9.encode("utf-8")
-    files["xl/tables/table9.xml"] = _query_table(9, "ФайлBinary", VOR_COLUMNS).encode("utf-8")
-    files["xl/queryTables/queryTable6.xml"] = _query_table_part(21, VOR_COLUMNS).encode("utf-8")
+    # --- листы промежуточных запросов убираем: запросы остаются, но только как соединения (без загрузки на лист) ---
+    wb0 = text("xl/workbook.xml")
+    rels0 = text("xl/_rels/workbook.xml.rels")
+    removed_parts: list[str] = []
+    for sheet_name in DROP_SHEETS:
+        rid = re.search(rf'<sheet name="{re.escape(sheet_name)}"[^>]*r:id="(rId\d+)"', wb0).group(1)
+        rel_tag = re.search(rf'<Relationship\b[^>]*Id="{rid}"[^>]*/>', rels0).group(0)
+        sheet_file = "xl/" + re.search(r'Target="([^"]*)"', rel_tag).group(1)
+        rels0 = rels0.replace(rel_tag, "")
+        removed_parts.append(sheet_file)
+        sheet_rels = sheet_file.replace("worksheets/", "worksheets/_rels/") + ".rels"
+        for table in re.findall(r'Target="\.\./tables/([^"]*)"', text(sheet_rels)):
+            removed_parts += [f"xl/tables/{table}", f"xl/tables/_rels/{table}.rels"]
+            for qt in re.findall(r'Target="\.\./queryTables/([^"]*)"', text(f"xl/tables/_rels/{table}.rels")):
+                removed_parts.append(f"xl/queryTables/{qt}")
+        removed_parts.append(sheet_rels)
+        wb0 = re.sub(rf'<sheet name="{re.escape(sheet_name)}"[^>]*/>', "", wb0)
+    types0 = text("[Content_Types].xml")
+    for part in removed_parts:
+        files.pop(part, None)
+        types0 = re.sub(rf'<Override\b[^>]*PartName="/{re.escape(part)}"[^>]*/>', "", types0)
+    files["[Content_Types].xml"] = types0.encode("utf-8")
+    files["xl/_rels/workbook.xml.rels"] = rels0.encode("utf-8")
+    # имена ExternalData_1 старых листов привязаны к их номеру: пересчитываем по именам листов до удаления
+    old_sheet_names = re.findall(r'<sheet name="([^"]*)"', text("xl/workbook.xml"))
+    old_defined_all = re.findall(r'<definedName name="ExternalData_1" localSheetId="(\d+)" hidden="1">([^<]*)</definedName>',
+                                 text("xl/workbook.xml"))
+    kept_defined = {old_sheet_names[int(i)]: ref for i, ref in old_defined_all if old_sheet_names[int(i)] not in DROP_SHEETS}
+    files["xl/workbook.xml"] = wb0.encode("utf-8")
 
     # --- СписокСО: пустой список (шапка в строке 15, как у СписокВОР), таблица 10 ---
     list_headers = re.findall(r'<tableColumn id="\d+" name="([^"]*)"', text("xl/tables/table1.xml"))
@@ -198,6 +213,9 @@ def build() -> None:
         defined[name] = f"{name}!$A$1:${qb._col_letter(len(columns) - 1)}$2"
         new_sheets.append((name, sheet_no))
         sheet_no, table_id, qt_no, conn_id = sheet_no + 1, table_id + 1, qt_no + 1, conn_id + 1
+    for name in CONNECTION_ONLY:
+        connections += _connection(conn_id, name)
+        conn_id += 1
     files["xl/connections.xml"] = text("xl/connections.xml").replace("</connections>", connections + "</connections>").encode("utf-8")
 
     # --- workbook.xml: листы, имена ExternalData_1 (localSheetId - номер листа по порядку) ---
@@ -215,10 +233,7 @@ def build() -> None:
                             f'<Relationship Id="{rid}" Type="{REL}/worksheet" Target="worksheets/sheet{number}.xml"/></Relationships>')
         target = INSERT_AFTER.get(name)
         names.insert(names.index(target) + 1 if target in names else len(names), name)
-    old_order = [s[0] for s in old_sheets]
-    old_defined = re.findall(r'<definedName name="ExternalData_1" localSheetId="(\d+)" hidden="1">([^<]*)</definedName>', wb)
-    defined_by_sheet = {old_order[int(i)]: ref for i, ref in old_defined}
-    defined_by_sheet["ФайлBinary"] = f"ФайлBinary!$A$1:${last}$2"
+    defined_by_sheet = dict(kept_defined)
     defined_by_sheet.update(defined)
     defined_xml = "".join(
         f'<definedName name="ExternalData_1" localSheetId="{names.index(name)}" hidden="1">{ref}</definedName>'

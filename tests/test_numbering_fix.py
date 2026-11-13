@@ -95,3 +95,4 @@ def test_hidden_numbered_paragraphs_are_not_written():
         flat = [str(c).strip() for t in _first_cells(fixed) for c in t]
     assert "31.1" in flat
     assert not any(c.startswith("1 2 3") for c in flat)
+

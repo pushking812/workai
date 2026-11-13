@@ -41,8 +41,11 @@ def test_sheets_and_tables(book):
     wb = z.read("xl/workbook.xml").decode("utf-8")
     names = re.findall(r'<sheet name="([^"]+)"', wb)
     assert names[:2] == ["СписокВОР", "СписокСО"]
-    for expected in ["ФайлBinary", "СО_ФайлBinary", "Пересечение", "Только_в_СО", "Только_в_ВОР", "Связь_ВОР_СО"]:
+    for expected in ["Справочники", "Пересечение", "Только_в_СО", "Только_в_ВОР", "Связь_ВОР_СО"]:
         assert expected in names
+    # промежуточные запросы и Связь_Вид листов не имеют
+    for dropped in ["ФайлBinary", "СО_ФайлBinary", "Prefix", "СписокФайлов", "Связь_Вид"]:
+        assert dropped not in names
     assert len(names) == len(set(names))
     tables = {}
     for name in z.namelist():
@@ -62,7 +65,7 @@ def test_connections_and_defined_names(book):
     connections = z.read("xl/connections.xml").decode("utf-8")
     connection_ids = re.findall(r'<connection id="(\d+)"', connections)
     assert len(connection_ids) == len(set(connection_ids))
-    for name in module.QUERY_SHEETS:
+    for name in [*module.QUERY_SHEETS, *module.CONNECTION_ONLY]:
         assert f"Location={name}" in connections
     wb = z.read("xl/workbook.xml").decode("utf-8")
     sheets = re.findall(r'<sheet name="([^"]+)"', wb)

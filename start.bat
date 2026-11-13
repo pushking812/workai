@@ -1,0 +1,1 @@
+& "$env:TEMP\workai_venv\Scripts\python.exe" main.py

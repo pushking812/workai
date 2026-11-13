@@ -15,7 +15,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$Workbook,
     [string]$OutDir = "data\exports\_pq_check",
-    [int]$TimeoutSec = 600
+    [int]$TimeoutSec = 600,
+    [switch]$AllowRunning   # by default the script refuses to run while a user's Excel is open
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,18 +34,17 @@ $logPath = Join-Path $outFull "_refresh_log.txt"
 $log = New-Object System.Collections.Generic.List[string]
 $failed = $false
 
-Add-Type -Namespace Win -Name Native -MemberDefinition @"
-[System.Runtime.InteropServices.DllImport("user32.dll")]
-public static extern int GetWindowThreadProcessId(System.IntPtr hWnd, out int pid);
-"@
-
-$xl = New-Object -ComObject Excel.Application
-$xl.Visible = $false
-$xl.DisplayAlerts = $false
+. "$PSScriptRoot\excel_session.ps1"
+try {
+    $session = Start-ExcelSession -AllowRunning:$AllowRunning
+} catch {
+    Write-Output ("ERROR: " + $_.Exception.Message)
+    Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    exit 1
+}
+$xl = $session.App
 $xl.AskToUpdateLinks = $false
-
-$xlPid = 0
-[void][Win.Native]::GetWindowThreadProcessId([System.IntPtr]$xl.Hwnd, [ref]$xlPid)
+$xlPid = $session.Pid
 $watchdog = $null
 if ($xlPid -gt 0) {
     $watchdog = Start-Job -ScriptBlock {
@@ -175,8 +175,7 @@ catch {
 }
 finally {
     if ($wb) { try { $wb.Close($false) } catch { } }
-    try { $xl.Quit() } catch { }
-    [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($xl)
+    Stop-ExcelSession $session
     if ($watchdog) { Stop-Job $watchdog -ErrorAction SilentlyContinue; Remove-Job $watchdog -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
 }

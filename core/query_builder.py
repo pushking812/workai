@@ -43,6 +43,19 @@ TEMPLATES: dict[str, dict[str, str]] = {
     },
 }
 
+# Режимы «Сформировать запросы»: отдельная книга на каждый тип документа или одна общая ВОР+СО.
+MODE_BY_TYPE = "by_type"
+MODE_COMBINED = "combined"
+
+# Общая книга ВОР+СО (собирает scripts/make_combined_template.py): два списка CSV в одной книге.
+# Справочник колонок СО зашит в запрос книги, поэтому у списка СО справочника-таблицы нет.
+COMBINED_TEMPLATE: dict[str, Any] = {
+    "path": os.path.join("PQ", "Общая", "шаблон ВОР+СО.xlsx"),
+    "label": "ВОР+СО",
+    VOR: {"sheet": "СписокВОР", "table": "СписокВОР"},
+    SPEC: {"sheet": "СписокСО", "table": "СписокСО"},
+}
+
 # Имя роли в книге, если оно отличается от канонического имени в БД: запросы
 # шаблона (`ФайлBinary`) ждут именно эти имена колонок.
 ROLE_ALIASES: dict[str, dict[str, str]] = {
@@ -475,10 +488,13 @@ def build_queries(
     templates: dict[str, dict[str, str]] | None = None,
     out_dir: str | None = None,
     now: datetime | None = None,
+    mode: str = MODE_BY_TYPE,
+    combined: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Формирует по одной книге на каждый тип документа, для которого есть шаблон.
 
-    В книгу типа попадают документы всех выбранных комплектов.
+    В книгу типа попадают документы всех выбранных комплектов. В режиме
+    `MODE_COMBINED` из ВОР и СО выбранных файлов собирается одна общая книга.
 
     Файлы других типов, без CSV или с удалённым CSV пропускаются и попадают в
     `skipped` с причиной.
@@ -511,6 +527,12 @@ def build_queries(
     finally:
         connection.close()
 
+    if mode == MODE_COMBINED:
+        book = _build_combined(by_type, templates, combined or COMBINED_TEMPLATE, out_dir, stamp, db_path)
+        return {"books": [book], "skipped": skipped}
+    if mode != MODE_BY_TYPE:
+        raise QueryBuildError(f"Неизвестный режим: {mode}")
+
     books = []
     for doc_type, rows in by_type.items():
         spec = templates[doc_type]
@@ -526,6 +548,32 @@ def build_queries(
                       "unresolved_headers": unresolved,
                       "ambiguous_versions": find_ambiguous_versions(rows)})
     return {"books": books, "skipped": skipped}
+
+
+def _build_combined(by_type: dict[str, list[dict[str, Any]]], templates: dict[str, dict[str, str]],
+                    combined: dict[str, Any], out_dir: str, stamp: str, db_path: str | None) -> dict[str, Any]:
+    """Одна книга из шаблона ВОР+СО: список ВОР и список СО заполняются по очереди."""
+    vor_rows, so_rows = by_type.get(VOR, []), by_type.get(SPEC, [])
+    missing = [name for name, rows in (("ВОР", vor_rows), ("СО", so_rows)) if not rows]
+    if missing:
+        raise QueryBuildError("Для общей книги ВОР+СО нужны выбранные файлы с CSV обоих типов; нет: " + ", ".join(missing))
+    output = os.path.join(out_dir, f"{combined.get('label', 'ВОР+СО')}_{stamp}.xlsx")
+    middle = output + ".vor.tmp"
+    try:
+        reference, unresolved = _reference_for(templates[VOR], VOR, vor_rows, db_path)
+        fill_template(combined["path"], middle, vor_rows, combined[VOR]["sheet"], combined[VOR]["table"], reference)
+        fill_template(middle, output, so_rows, combined[SPEC]["sheet"], combined[SPEC]["table"])
+    finally:
+        if os.path.exists(middle):
+            os.remove(middle)
+    rows = vor_rows + so_rows
+    kit_keys = list(dict.fromkeys(r["kit_key"] for r in rows))
+    return {"doc_type": combined.get("label", "ВОР+СО"), "path": os.path.abspath(output),
+            "kits": [{"code": k[0], "revision": k[1], "date": k[2]} for k in kit_keys],
+            "files": len({r["file_id"] for r in rows}), "rows": len(rows),
+            "rows_by_type": {VOR: len(vor_rows), SPEC: len(so_rows)},
+            "unresolved_headers": unresolved,
+            "ambiguous_versions": find_ambiguous_versions(vor_rows) + find_ambiguous_versions(so_rows)}
 
 
 def _kit_label(kit_key: tuple) -> str:

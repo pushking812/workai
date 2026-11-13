@@ -442,6 +442,23 @@ function confirmDialog(text) {
   });
 }
 
+// Выбор варианта «Сформировать запросы»: "by_type", "combined" или null (отмена).
+function queriesModeDialog() {
+  return new Promise((resolve) => {
+    const popup = $("queries-mode-popup");
+    const buttons = ["queries-mode-by-type", "queries-mode-combined", "queries-mode-cancel"];
+    const done = (answer) => {
+      popup.hidden = true;
+      buttons.forEach((id) => { $(id).onclick = null; });
+      resolve(answer);
+    };
+    $("queries-mode-by-type").onclick = () => done("by_type");
+    $("queries-mode-combined").onclick = () => done("combined");
+    $("queries-mode-cancel").onclick = () => done(null);
+    popup.hidden = false;
+  });
+}
+
 // ---------- Выделение ----------
 
 function toggle(id, on) {
@@ -687,6 +704,8 @@ async function onBuildQueries() {
   if (state.tasksRunning) return;
   const ids = [...state.selected];
   if (!ids.length) return;
+  const mode = await queriesModeDialog();
+  if (mode === null) return;
   setStatus("Проверка заголовков...", null);
   const check = await api().check_headers(ids);
   if (check.status === "ok" && check.unresolved.length) {
@@ -699,7 +718,7 @@ async function onBuildQueries() {
     if (applied.status !== "ok") showError("Не все решения применены:\n" + applied.errors.join("\n"));
   }
   setStatus("Формирование запросов...", null);
-  const result = await api().build_queries(ids);
+  const result = await api().build_queries(ids, mode);
   if (result.status !== "ok") {
     setStatus("Запросы не сформированы", null);
     showError(result.message || "Не удалось сформировать запросы");

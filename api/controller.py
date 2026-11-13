@@ -144,12 +144,12 @@ class Controller:
         """«Подготовить»: маппинг актуальных SAVED-файлов."""
         return {"status": "started", "queued": self.tasks.prepare_files(file_ids)}
 
-    def build_queries(self, file_ids: list[int], opener=None) -> dict[str, Any]:
-        """«Сформировать запросы»: копия шаблона по типу с таблицей CSV выбранных файлов."""
+    def build_queries(self, file_ids: list[int], opener=None, mode: str = query_builder.MODE_BY_TYPE) -> dict[str, Any]:
+        """«Сформировать запросы»: копия шаблона по типу (`by_type`) или общая книга ВОР+СО (`combined`)."""
         if not file_ids:
             return {"status": "error", "message": "Не выбрано ни одного файла"}
         try:
-            result = query_builder.build_queries(file_ids, self.db_path)
+            result = query_builder.build_queries(file_ids, self.db_path, mode=mode)
         except query_builder.QueryBuildError as exc:
             return {"status": "error", "message": str(exc)}
         if not result["books"]:
@@ -441,8 +441,8 @@ def prepare_selected(file_ids: list[int] | None = None) -> dict[str, Any]:
     return get_controller().prepare_selected(file_ids)
 
 
-def build_queries(file_ids: list[int]) -> dict[str, Any]:
-    return get_controller().build_queries(file_ids)
+def build_queries(file_ids: list[int], mode: str = query_builder.MODE_BY_TYPE) -> dict[str, Any]:
+    return get_controller().build_queries(file_ids, mode=mode)
 
 
 def check_headers(file_ids: list[int]) -> dict[str, Any]:

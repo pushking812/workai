@@ -69,8 +69,8 @@ class Api:
     def prepare_selected(self, file_ids=None) -> dict[str, Any]:
         return controller.prepare_selected(file_ids)
 
-    def build_queries(self, file_ids) -> dict[str, Any]:
-        return controller.build_queries(file_ids)
+    def build_queries(self, file_ids, mode="by_type") -> dict[str, Any]:
+        return controller.build_queries(file_ids, mode=mode)
 
     def check_headers(self, file_ids) -> dict[str, Any]:
         return controller.check_headers(file_ids)

@@ -2,7 +2,7 @@ let
     Source = СписокФайлов,
 
     // Этап по файлу: fnReadCsv (чтение CSV, заголовок, нумерация граф, канонические колонки).
-    // Значения столбцов СО не преобразуются: что в CSV, то и в таблице.
+    // Значения столбцов СО не преобразуются: что в CSV, то и в таблице (кроме NПП: убирается точка в конце).
     // Ошибка файла превращается в строку с текстом в "Предупреждение".
     Таблицы = List.Transform(Table.ToRecords(Source), each
         let
@@ -21,9 +21,13 @@ let
                     п3 = Table.RemoveColumns(п2, {"NСтроки"}),
                     п4 = Table.AddColumn(п3, "ШифрПроекта", each шифр, type text),
                     п5 = Table.AddColumn(п4, "НомИзмПроекта", each измНом),
-                    п6 = Table.AddColumn(п5, "ДатаИзм", each измДата, type nullable date)
+                    п6 = Table.AddColumn(п5, "ДатаИзм", each измДата, type nullable date),
+                    // Номер пункта без завершающей точки: "12." -> "12" (остальные значения не меняются)
+                    п7 = if Table.HasColumns(п6, "NПП")
+                        then Table.TransformColumns(п6, {{"NПП", each if _ = null then null else Text.TrimEnd(Text.Trim(Text.From(_)), "."), type text}})
+                        else п6
                 in
-                    п6
+                    п7
         in
             if r[HasError]
             then #table({"ИмяФайла", "Предупреждение"}, {{ csv, "ОШИБКА: " & Text.From(r[Error][Message]) }})

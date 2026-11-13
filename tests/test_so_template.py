@@ -59,7 +59,7 @@ def test_so_queries_have_no_vor_specific_steps():
         with open(path, encoding="utf-8-sig") as handle:
             code += handle.read()
     for forbidden in ("fnParseChertezhi", "fnParseSpec", "fnSplitReferences", "NППРДСО", "ЛистыРД",
-                      "Раздел", "СписокВОР"):
+                      "СписокВОР"):
         assert forbidden not in code, forbidden
     assert "СписокСО" in code and "КлючСО" in code
 

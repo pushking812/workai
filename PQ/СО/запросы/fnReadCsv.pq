@@ -6,7 +6,7 @@ let
     // Номер таблицы документа берём из имени CSV: <хэш>_table_N.csv
     НомерТаблицы =
         let
-            txt = Text.BetweenDelimiters(Text.Lower(filePath), "_table_", ".csv"),
+            txt = List.First(Text.Split(List.Last(Text.Split(Text.Lower(filePath), "_table_")), ".")),
             num = try Number.From(txt) otherwise null
         in
             if num = null then 1 else num,

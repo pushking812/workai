@@ -83,7 +83,7 @@ def parse_numbering(numbering_xml_path):
             if start_override_el and ilvl in levels:
                 levels[ilvl]['startOverride'] = int(start_override_el[0].get(qn('val')))
 
-        num_map[num_id] = {'levels': levels}
+        num_map[num_id] = {'levels': levels, 'abstract': abstract_id}
 
     return num_map
 
@@ -169,6 +169,7 @@ def process_file(input_path, output_path, verbose=True):
     body = doc.element.body
 
     counters = {}
+    seen_nums = set()
     modified = 0
     skipped_no_def = 0
 
@@ -209,7 +210,15 @@ def process_file(input_path, output_path, verbose=True):
         level_def = num_map[num_id]['levels'][ilvl]
         if from_style and level_def['numFmt'] == 'bullet':
             continue  # маркер списка, не номер
-        key = (num_id, ilvl)
+        # Как в Word: разные numId с одним abstractNum делят счётчики;
+        # перезапуск только при первом использовании numId с startOverride.
+        group = num_map[num_id].get('abstract', num_id)
+        if num_id not in seen_nums:
+            seen_nums.add(num_id)
+            for lvl_key, lvl_def_o in num_map[num_id]['levels'].items():
+                if lvl_def_o['startOverride'] is not None:
+                    counters.pop((group, lvl_key), None)
+        key = (group, ilvl)
 
         if key not in counters:
             initial = (level_def['startOverride']
@@ -221,16 +230,27 @@ def process_file(input_path, output_path, verbose=True):
 
         current_val = counters[key]
 
+        # Как в Word: пропущенные старшие уровни считаются уже начатыми (1.1 без «1.»),
+        # поэтому следующий абзац старшего уровня получит следующий номер, а не 1
+        for j in range(int(ilvl)):
+            upper_key = (group, str(j))
+            if upper_key not in counters:
+                upper_def = num_map[num_id]['levels'].get(str(j))
+                if upper_def is not None:
+                    counters[upper_key] = (upper_def['startOverride']
+                                           if upper_def['startOverride'] is not None
+                                           else upper_def['start'])
+
         # Сброс счётчиков более глубоких уровней
         # (по умолчанию в Word: при инкременте уровня k все уровни > k сбрасываются)
         for k in list(counters.keys()):
-            if k[0] == num_id and int(k[1]) > int(ilvl):
+            if k[0] == group and int(k[1]) > int(ilvl):
                 del counters[k]
 
         # Подстановка ВСЕХ плейсхолдеров %N в lvlText
         def _replace_placeholder(match):
             level_num = int(match.group(1)) - 1  # %1 → уровень 0, %2 → уровень 1, ...
-            level_key = (num_id, str(level_num))
+            level_key = (group, str(level_num))
             if level_key in counters:
                 val = counters[level_key]
             else:

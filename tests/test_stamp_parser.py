@@ -29,14 +29,22 @@ from core.parsers.stamp_parser import (
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOC_ES1 = os.path.join(ROOT, "16_ЕСТ-ПМ-80825-Р-1-ЭС1_ВОР.docx")
-DOC_ISVN = os.path.join(ROOT, "ЕСТ-ПМ-80825-Р-1-ИСВН_ВОР.docx")
+DOC_ES1 = os.path.join(ROOT, "16_ЕСТ-ПМ-80825-Р-1-ЭС1_ВОР (Изм. 2025-08-01).docx")
+DOC_ISVN = os.path.join(ROOT, "13.2_Р-1-ИСВН.ВОР_изм.1_1.docx")
+
+
+RD_DIR = os.path.join(ROOT, "РД")
 
 
 def _require(path: str) -> str:
-    if not os.path.exists(path):
-        pytest.skip("нет тестового документа " + os.path.basename(path))
-    return path
+    """Путь к реальному документу: как задан, иначе поиск по имени файла в РД."""
+    if os.path.exists(path):
+        return path
+    name = os.path.basename(path)
+    for folder, _dirs, files in os.walk(RD_DIR):
+        if name in files:
+            return os.path.join(folder, name)
+    pytest.skip("нет тестового документа " + name)
 
 
 def _stamp_grid(code: str = "ЕСТ-ПМ-80825-Р-1-ИСВН.ВОР") -> list[list[str]]:
@@ -172,9 +180,9 @@ def test_stamp_isvn() -> None:
     assert stamp["section_code"] == "ИСВН"
     assert stamp["doc_type"] == "ВОР"
     assert stamp["revision"] == "1"
-    assert stamp["revision_date"] == "2026-02-06"
+    assert stamp["revision_date"] == "2026-06-24"
     assert stamp["sheet"] == 1
-    assert stamp["sheets_total"] == 9
+    assert stamp["sheets_total"] == 8
 
 
 def test_stamp_isvn_full_fields() -> None:
@@ -186,7 +194,7 @@ def test_stamp_isvn_full_fields() -> None:
     assert stamp["document_name"] == "Система интеллектуального видеонаблюдения Ведомость объемов работ"
     by_position = {item["position"]: item for item in stamp["executors"]}
     assert by_position["Разработал"]["name"] == "Анисимов А.Ю."
-    assert by_position["Разработал"]["date"] == "06.02.26"
+    assert by_position["Разработал"]["date"] == "24.06.26"
     assert by_position["Проверил"]["name"] == "Шастов А.В."
     assert by_position["ГИП"]["name"] == "Шастов А.В."
     assert by_position["ГИП"]["signature"] == ""
@@ -328,11 +336,13 @@ def test_write_parsing_results_to_xlsx() -> None:
     """Записывает все распарсенные данные штампов в vor_parsing_results.xlsx."""
     import openpyxl
 
-    documents = [path for path in (DOC_ES1, DOC_ISVN) if os.path.exists(path)]
-    if os.path.isdir(VOR_DIR):
-        documents += sorted(
-            os.path.join(VOR_DIR, name) for name in os.listdir(VOR_DIR) if name.lower().endswith(".docx")
-        )
+    documents = []
+    for folder, _dirs, files in os.walk(RD_DIR):
+        documents += [
+            os.path.join(folder, name)
+            for name in sorted(files)
+            if name.lower().endswith(".docx") and "ВОР" in name and not name.startswith("~$")
+        ]
     if not documents:
         pytest.skip("нет тестовых документов")
 

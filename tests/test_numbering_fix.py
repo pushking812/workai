@@ -80,3 +80,18 @@ def test_non_docx_returned_as_is(tmp_path):
     path.write_bytes(b"x")
     with numbering_fixed(str(path)) as fixed:
         assert fixed == str(path)
+
+
+IZM1 = os.path.join(
+    "РД", "ЕСТ-ПМ-80825-Р-1-АПС", "ИЗМ1 - согласован", "Ред. формат",
+    "21. ВОР_Изм.1 от 2025.10._(Нов.)_Изм.1 - 2026-09-17.docx",
+)
+
+
+@pytest.mark.skipif(not os.path.exists(IZM1), reason="нет файла 21. ВОР Изм.1")
+def test_hidden_numbered_paragraphs_are_not_written():
+    """Скрытые (vanish) абзацы с номером считаются, но в ячейку не попадают."""
+    with numbering_fixed(IZM1) as fixed:
+        flat = [str(c).strip() for t in _first_cells(fixed) for c in t]
+    assert "31.1" in flat
+    assert not any(c.startswith("1 2 3") for c in flat)

@@ -252,6 +252,11 @@ def process_file(input_path, output_path, verbose=True):
         for np in num_pr_list:
             np.getparent().remove(np)
 
+        # Скрытый абзац (знак абзаца с w:vanish): номер учтён в счётчике,
+        # но в Word он не виден, поэтому в текст его не вставляем
+        if p.xpath('./w:pPr/w:rPr/w:vanish[not(@w:val="0") and not(@w:val="false")]'):
+            continue
+
         # 3.2 Явно обнуляем отступ (перебивает стиль pStyle)
         p_pr_list = p.xpath('./w:pPr')
         if p_pr_list:

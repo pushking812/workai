@@ -221,6 +221,33 @@ def _fits_sequence(seq: list[tuple[int, ...] | None], index: int) -> bool:
     return bool((prev and _follows(prev, cur)) or (nxt and _follows(cur, nxt)))
 
 
+def _is_partial_continuation(row, result, result_seq, seq, i, num_col, name_col, qty_cols) -> bool:
+    """Продолжение пункта, где наименование разбито, а остальные данные (тип, объём)
+    стоят во второй строке: пункт 31 «…на балюстраде эскалатора» + «в комплекте с…».
+
+    Условия: у строки нет номера и есть наименование; у предыдущей строки есть номер и
+    нет объёма, у этой объём есть; заполненные колонки не противоречат друг другу;
+    следующий пронумерованный пункт продолжает нумерацию предыдущего."""
+    if not qty_cols or not result or result_seq[-1] is None:
+        return False
+    if num_col < len(row) and row[num_col].strip():
+        return False
+    if name_col >= len(row) or not row[name_col].strip():
+        return False
+    prev_row = result[-1]
+    if any(k < len(prev_row) and prev_row[k].strip() for k in qty_cols):
+        return False
+    if not any(k < len(row) and row[k].strip() for k in qty_cols):
+        return False
+    for k, cell in enumerate(row):
+        if k in (num_col, name_col) or k >= len(prev_row):
+            continue
+        if cell.strip() and prev_row[k].strip() and cell.strip() != prev_row[k].strip():
+            return False
+    nxt = next((s for s in seq[i + 1 :] if s is not None), None)
+    return nxt is None or _follows(result_seq[-1], nxt)
+
+
 def merge_wrapped_names(headers: list[str], rows: list[list[str]]) -> list[list[str]]:
     """Наименование, разбитое на две строки таблицы, склеивается в одну.
 
@@ -235,6 +262,7 @@ def merge_wrapped_names(headers: list[str], rows: list[list[str]]) -> list[list[
     seq = [_number_parts(r[num_col]) if num_col < len(r) else None for r in rows]
     if sum(1 for s in seq if s) / max(1, sum(1 for r in rows if any(c.strip() for c in r))) < NUMBERED_NAMES_SHARE:
         return rows
+    qty_cols = [i for i, h in enumerate(headers) if re.sub(r"[\s\-]", "", h.casefold()).startswith("кол")]
     result: list[list[str]] = []
     result_seq: list[tuple[int, ...] | None] = []
     for i, row in enumerate(rows):
@@ -251,6 +279,13 @@ def merge_wrapped_names(headers: list[str], rows: list[list[str]]) -> list[list[
             if has_data and nxt is not None and _follows(result_seq[-1], nxt):
                 prev_row[name_col] = (prev_row[name_col].rstrip() + " " + row[name_col].strip()).strip()
                 continue
+        elif _is_partial_continuation(row, result, result_seq, seq, i, num_col, name_col, qty_cols):
+            prev_row = result[-1]
+            prev_row[name_col] = (prev_row[name_col].rstrip() + " " + row[name_col].strip()).strip()
+            for k, cell in enumerate(row):
+                if k not in (num_col, name_col) and k < len(prev_row) and not prev_row[k].strip():
+                    prev_row[k] = cell
+            continue
         result.append(row)
         result_seq.append(seq[i])
     return result
@@ -312,6 +347,42 @@ def fill_repeated_numbers(headers: list[str], rows: list[list[str]]) -> list[lis
     return result
 
 
+_DITTO_RE = re.compile(r"""^[-–—]\s*(?://|"|''|〃)\s*[-–—]$|^〃$""")
+
+
+def is_ditto(value: str) -> bool:
+    """`- // -`, `-//-`, `- " -`: «как в предыдущей строке»."""
+    return bool(_DITTO_RE.match((value or "").strip()))
+
+
+def expand_ditto(headers: list[str], rows: list[list[str]]) -> list[list[str]]:
+    """`- // -` заменяется ближайшим выше непустым значением той же колонки (если в
+    предыдущей строке пусто — берётся первое непустое выше; цепочка разворачивается
+    по порядку). Пустые строки и строки-разделы пропускаются. Если выше значения нет,
+    обозначение остаётся как есть. Колонка номера не трогается."""
+    folded = [normalize_header(h).casefold() for h in headers]
+    num_col = next((i for i, h in enumerate(folded) if h in _POSITION_HEADERS), None)
+    name_col = next((i for i, h in enumerate(headers) if h.casefold().startswith("наименование")), None)
+    result: list[list[str]] = []
+    last: dict[int, str] = {}  # колонка → последнее непустое значение выше
+    for row in rows:
+        row = list(row)
+        has_data = any(c.strip() for k, c in enumerate(row) if k not in (num_col, name_col))
+        if not has_data or _is_section_row([c.strip() for c in row]):
+            result.append(row)
+            continue
+        for k, cell in enumerate(row):
+            if k == num_col:
+                continue
+            if is_ditto(cell):
+                if k in last:
+                    row[k] = last[k]
+            elif cell.strip():
+                last[k] = cell
+        result.append(row)
+    return result
+
+
 def parse_table(table: list[list[str]], like: "ParsedTable | None" = None) -> ParsedTable:
     """См. `_parse_table`; дополнительно заполняет `number_issues`."""
     parsed = _parse_table(table, like)
@@ -320,6 +391,7 @@ def parse_table(table: list[list[str]], like: "ParsedTable | None" = None) -> Pa
         parsed.rows = fill_repeated_numbers(parsed.headers, parsed.rows)
         parsed.rows, conflicts = move_name_numbers(parsed.headers, parsed.rows)
         parsed.rows = merge_wrapped_names(parsed.headers, parsed.rows)
+    parsed.rows = expand_ditto(parsed.headers, parsed.rows)
     found = suspect_row_numbers(parsed.headers, parsed.rows)
     parsed.number_issues = found + [c for c in conflicts if c not in found]
     return parsed

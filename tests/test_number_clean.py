@@ -172,3 +172,18 @@ def test_repeated_number_all_in_names_column_empty():
     parsed = parse_table(t)
     nums = [r[0] for r in parsed.rows if r[1].startswith('Кабель')]
     assert nums == ['14.1'] * 4
+
+
+def test_wrapped_name_with_data_in_second_row_is_merged():
+    from core.parsers.header_profiles import merge_wrapped_names
+    headers = ['Поз.', 'Наименование и техническая характеристика', 'Тип', 'Поставщик', 'Ед. изме- ре- ния', 'Коли- чест- во']
+    rows = [
+        ['30', 'Громкоговоритель настенный', 'АСР-10', 'НПП', 'шт.', '2'],
+        ['31', 'Громкоговоритель для наклонного хода', '', '', 'шт.', ''],
+        ['', 'в комплекте с кронштейном', 'АСР-06', '- // -', 'шт.', '1'],
+        ['32', 'Громкоговоритель рупорный', 'ГР-10', '- // -', 'шт.', '1'],
+    ]
+    out = merge_wrapped_names(headers, rows)
+    assert len(out) == 3
+    assert out[1] == ['31', 'Громкоговоритель для наклонного хода в комплекте с кронштейном', 'АСР-06', '- // -', 'шт.', '1']
+

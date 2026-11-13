@@ -16,6 +16,25 @@ def test_suspect_other_columns_ignored():
     assert suspect_row_numbers(["Наименование", "Ед. изм."], [["a1)", "b)"]]) == []
 
 
+def test_repeated_item_number_moves_from_name_even_below_threshold():
+    rows = [["1", "2", "3"]]
+    for i in range(1, 9):
+        rows.append([f"13.{i}", f"Прибор {i}", "шт"])
+    rows += [
+        ["14.1", "Кабель 1x2", "м"],
+        ["14.1", "Кабель 1x2", "м"],
+        ["", "14.1 Кабель 1x2", "м"],
+        ["", "14.1 Кабель 1x2", "м"],
+        ["14.2", "Кабель 3x2", "м"],
+        ["", "14.2 Кабель 3x2", "м"],
+    ]
+    parsed = parse_table([["Поз.", "Наименование", "Ед. изм."]] + rows)
+    tail = parsed.rows[-6:]
+    assert [r[0] for r in tail] == ["14.1", "14.1", "14.1", "14.1", "14.2", "14.2"]
+    assert {r[1] for r in tail[:4]} == {"Кабель 1x2"}
+    assert tail[5][1] == "Кабель 3x2"
+
+
 def test_parse_table_flags_bracket_number():
     table = [
         ["№ п/п", "Наименование работ", "Ед. изм.", "Кол-во"],
@@ -140,3 +159,16 @@ def test_kit_info_reports_number_issues_but_check_ignores_them():
     assert kits.check_kits([row]) == []
 
 
+
+
+def test_repeated_number_all_in_names_column_empty():
+    rows = [['1', '2', '3']]
+    rows.append(['', '14. Раздел', ''])
+    for _ in range(4):
+        rows.append(['', '14.1 Кабель 1x2', 'м'])
+    rows.append(['', '14.2 Коробка', 'шт'])
+    rows.append(['', '14.3 Лента', 'шт'])
+    t = [['Поз.', 'Наименование', 'Ед. изм.']] + rows
+    parsed = parse_table(t)
+    nums = [r[0] for r in parsed.rows if r[1].startswith('Кабель')]
+    assert nums == ['14.1'] * 4

@@ -215,6 +215,9 @@ def _fits_sequence(seq: list[tuple[int, ...] | None], index: int) -> bool:
     nxt = next((seq[j] for j in range(index + 1, len(seq)) if seq[j] is not None), None)
     if prev is None and nxt is None:
         return True
+    # Повтор пункта для разных участков (14.1, 14.1, 14.1) тоже вписывается.
+    if cur in (prev, nxt):
+        return True
     return bool((prev and _follows(prev, cur)) or (nxt and _follows(cur, nxt)))
 
 
@@ -284,11 +287,37 @@ def move_name_numbers(headers: list[str], rows: list[list[str]]) -> tuple[list[l
     return result, issues
 
 
+def fill_repeated_numbers(headers: list[str], rows: list[list[str]]) -> list[list[str]]:
+    """Пустой номер + номер в начале наименования, равный номеру ближайшей строки
+    сверху или снизу с номером в колонке: номер переносится в колонку (повтор пункта
+    для разных участков, `14.1 Кабель…` рядом с `NПП` = `14.1`). Порог долей не нужен."""
+    folded = [normalize_header(h).casefold() for h in headers]
+    num_col = next((i for i, h in enumerate(folded) if h in _POSITION_HEADERS), None)
+    name_col = next((i for i, h in enumerate(headers) if h.casefold().startswith("наименование")), None)
+    if num_col is None or name_col is None or num_col == name_col:
+        return rows
+    col_seq = [_number_parts(r[num_col]) if num_col < len(r) else None for r in rows]
+    result = []
+    for index, row in enumerate(rows):
+        row = list(row)
+        if num_col < len(row) and name_col < len(row) and not row[num_col].strip():
+            split = _split_name_number(row[name_col])
+            parts = _number_parts(split[0]) if split else None
+            if parts is not None:
+                prev = next((col_seq[j] for j in range(index - 1, -1, -1) if col_seq[j] is not None), None)
+                nxt = next((col_seq[j] for j in range(index + 1, len(rows)) if col_seq[j] is not None), None)
+                if parts in (prev, nxt):
+                    row[num_col], row[name_col] = split
+        result.append(row)
+    return result
+
+
 def parse_table(table: list[list[str]], like: "ParsedTable | None" = None) -> ParsedTable:
     """См. `_parse_table`; дополнительно заполняет `number_issues`."""
     parsed = _parse_table(table, like)
     conflicts: list[str] = []
     if not parsed.hierarchical:
+        parsed.rows = fill_repeated_numbers(parsed.headers, parsed.rows)
         parsed.rows, conflicts = move_name_numbers(parsed.headers, parsed.rows)
         parsed.rows = merge_wrapped_names(parsed.headers, parsed.rows)
     found = suspect_row_numbers(parsed.headers, parsed.rows)

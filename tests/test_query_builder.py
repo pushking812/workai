@@ -80,7 +80,8 @@ def test_build_keeps_power_query_and_other_sheets(tmp_path, monkeypatch):
         assert src.namelist() == dst.namelist()
         changed = {n for n in src.namelist() if src.read(n) != dst.read(n)}
     # список файлов (лист + таблица) и справочник колонок (лист; таблица, если изменился диапазон)
-    assert 3 <= len(changed) <= 4 and all(n.startswith(("xl/worksheets/", "xl/tables/")) for n in changed)
+    # (шаблон уже имеет 18 столбцов и одну строку, поэтому таблица списка при одном файле может не меняться)
+    assert 2 <= len(changed) <= 4 and all(n.startswith(("xl/worksheets/", "xl/tables/")) for n in changed)
 
 
 def _reference(path):

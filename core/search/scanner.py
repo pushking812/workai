@@ -10,12 +10,25 @@ from collections.abc import Callable, Iterable, Iterator
 DEFAULT_EXTENSIONS = (".docx", ".doc")
 
 
+_LATIN_TO_CYRILLIC = str.maketrans({
+    "A": "А", "B": "В", "C": "С", "E": "Е", "H": "Н", "K": "К", "M": "М",
+    "O": "О", "P": "Р", "T": "Т", "X": "Х", "Y": "У",
+    "a": "а", "c": "с", "e": "е", "o": "о", "p": "р", "x": "х", "y": "у",
+    "k": "к", "m": "м", "h": "н", "b": "в", "t": "т",
+})
+
+
+def normalize_lookalikes(text: str) -> str:
+    """Визуально одинаковые латинские буквы -> кириллица (`Cпецификация` = `Спецификация`)."""
+    return (text or "").translate(_LATIN_TO_CYRILLIC)
+
+
 def _words_regex(name_words: Iterable[str] | None) -> "re.Pattern[str] | None":
     """Регэксп «слово целиком»: рядом с совпадением нет буквы (цифры и знаки можно).
 
     Так `СО` не находится в `СОС`, `СОУЭ`, `КСОБ`, `Содержание`, а `СВОР1` и `.ВОР` находятся.
     """
-    words = sorted({w.strip() for w in (name_words or ()) if w and w.strip()}, key=len, reverse=True)
+    words = sorted({normalize_lookalikes(w.strip()) for w in (name_words or ()) if w and w.strip()}, key=len, reverse=True)
     if not words:
         return None
     body = "|".join(re.escape(w) for w in words)
@@ -24,7 +37,7 @@ def _words_regex(name_words: Iterable[str] | None) -> "re.Pattern[str] | None":
 
 def _folder_key(text: str) -> str:
     """Имя папки для сравнения: без пробелов и регистра (`Ред. формат` = `Ред.формат`)."""
-    return "".join(text.split()).casefold()
+    return normalize_lookalikes("".join(text.split())).casefold()
 
 
 def folder_matcher(folder_filters: Iterable[str] | None) -> "Callable[[str], bool] | None":
@@ -78,7 +91,7 @@ def scan_files(
                 if os.path.splitext(name)[1].lower() not in extensions:
                     continue
                 lowered = name.lower()
-                if word_re is not None and not word_re.search(name):
+                if word_re is not None and not word_re.search(normalize_lookalikes(name)):
                     continue
                 if not fnmatch.fnmatch(lowered, mask):
                     continue

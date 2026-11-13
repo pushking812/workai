@@ -148,14 +148,22 @@ function formatTime(seconds) {
   return seconds == null ? "" : new Date(seconds * 1000).toLocaleString("ru-RU");
 }
 
+const LOOKALIKES = {
+  A: "А", B: "В", C: "С", E: "Е", H: "Н", K: "К", M: "М", O: "О", P: "Р", T: "Т", X: "Х", Y: "У",
+  a: "а", b: "в", c: "с", e: "е", h: "н", k: "к", m: "м", o: "о", p: "р", t: "т", x: "х", y: "у",
+};
+function normText(s) {
+  return String(s ?? "").replace(/[A-Za-z]/g, (ch) => LOOKALIKES[ch] || ch).toLowerCase();
+}
+
 function visibleRows() {
-  const needle = state.filter.trim().toLowerCase();
+  const needle = normText(state.filter.trim());
   let rows = state.rows.filter((r) => (r.db_status === "HIDDEN") === state.hiddenMode);
   if (state.hideUnknown) rows = rows.filter((r) => state.knownTypes.includes(r.doc_type));
   if (needle) {
     rows = rows.filter((r) =>
       [r.doc_code, r.revision, r.revision_date, r.filename, r.path, STATUS_LABELS[r.status]]
-        .some((v) => String(v ?? "").toLowerCase().includes(needle)));
+        .some((v) => normText(v).includes(needle)));
   }
   const key = state.sort.key === "path" ? "dir" : state.sort.key;
   const dir = state.sort.dir;

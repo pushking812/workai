@@ -70,6 +70,17 @@
 
 Отчёты по умолчанию лежат в `data/exports/probes/` (`dump_table_head.py` — в `data/exports/dumps/`).
 
+### check_volumes.py и check_volumes_docx.py
+
+Сверка объёмов (колонка «Кол-во») для книги СО. Книга должна быть обновлена в Excel: скрипты читают кэш листов.
+
+```
+python -X utf8 scripts/check_volumes.py "data/queries/СО_….xlsx"        # результат запроса ФайлBinary ↔ CSV
+python -X utf8 scripts/check_volumes_docx.py "data/queries/СО_….xlsx"   # CSV ↔ таблицы Word
+```
+
+Первый сравнивает суммы по файлу и по каждому NПП (свёртка повторов даёт меньше строк, но суммы равны). Второй берёт документ по хэшу из имени CSV (`files.hash`), определяет колонку количества по тексту шапки Word и сверяет сумму каждой таблицы; невыгруженные таблицы и таблицы без колонки количества попадают в отчёт. Отчёты: `data/exports/_report_volumes.tsv`, `data/exports/_report_volumes_docx.tsv`. Если нет кэша конвертации, второй скрипт откроет Word.
+
 ### dump_table_head.py
 Первые строки сырых таблиц файлов или папок (`.doc`, `.docx`), без разбора шапки. Отчёт `table_heads.xlsx`: лист на файл (полный текст ячеек) и лист «Итог».
 

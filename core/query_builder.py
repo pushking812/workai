@@ -45,15 +45,17 @@ TEMPLATES: dict[str, dict[str, str]] = {
 
 # Режимы «Сформировать запросы»: отдельная книга на каждый тип документа или одна общая ВОР+СО.
 MODE_BY_TYPE = "by_type"
-MODE_COMBINED = "combined"
+MODE_VOR_SO = "vor_so"
 
-# Общая книга ВОР+СО (собирает scripts/make_combined_template.py): два списка CSV в одной книге.
-# Справочник колонок СО зашит в запрос книги, поэтому у списка СО справочника-таблицы нет.
-COMBINED_TEMPLATE: dict[str, Any] = {
-    "path": os.path.join("PQ", "Общая", "шаблон ВОР+СО.xlsx"),
+# Книга ВОР+СО ВОР+СО (собирает scripts/make_vor_so_template.py) списков не содержит: она читает готовые
+# книги ВОР и СО из своей папки. Режим создаёт три файла с общим временем в имени (ВОР_, СО_, ВОР+СО_), а в таблицу
+# `Параметры` книги ВОР+СО записываются имена двух других файлов (папка считается формулой в самой книге).
+VOR_SO_TEMPLATE: dict[str, Any] = {
+    "path": os.path.join("PQ", "ВОР+СО", "шаблон ВОР+СО.xlsx"),
     "label": "ВОР+СО",
-    VOR: {"sheet": "СписокВОР", "table": "СписокВОР"},
-    SPEC: {"sheet": "СписокСО", "table": "СписокСО"},
+    "params_sheet": "Параметры",
+    # ячейки таблицы «Параметры» (строка 2): имя файла ВОР, имя файла СО
+    "params_cells": {VOR: "B2", SPEC: "C2"},
 }
 
 # Имя роли в книге, если оно отличается от канонического имени в БД: запросы
@@ -151,12 +153,12 @@ def _excel_date(value: Any) -> int | None:
         return None
 
 
-def _cell(ref: str, kind: str, value: Any) -> str:
+def _cell(ref: str, kind: str, value: Any, date_style: int = _DATE_STYLE) -> str:
     if value is None or value == "":
         return ""
     if kind == "date":
         serial = _excel_date(value)
-        return f'<c r="{ref}" s="{_DATE_STYLE}"><v>{serial}</v></c>' if serial else ""
+        return f'<c r="{ref}" s="{date_style}"><v>{serial}</v></c>' if serial else ""
     if kind == "int":
         try:
             return f'<c r="{ref}"><v>{int(value)}</v></c>'
@@ -211,7 +213,7 @@ def _rewrite_table(xml: str, header_row: int, count: int, last_row: int) -> str:
     )
 
 
-def _rewrite_sheet(xml: str, header_row: int, rows: list[dict[str, Any]]) -> str:
+def _rewrite_sheet(xml: str, header_row: int, rows: list[dict[str, Any]], date_style: int = _DATE_STYLE) -> str:
     kept = [
         m.group(0) for m in re.finditer(r'<row\b[^>]*\br="(\d+)"[^>]*?(?:/>|>.*?</row>)', xml, re.DOTALL)
         if int(re.search(r'\br="(\d+)"', m.group(0)).group(1)) < header_row
@@ -222,7 +224,7 @@ def _rewrite_sheet(xml: str, header_row: int, rows: list[dict[str, Any]]) -> str
     for offset, item in enumerate(rows, 1):
         number = header_row + offset
         cells = "".join(
-            _cell(f"{_col_letter(i)}{number}", kind, item.get(field))
+            _cell(f"{_col_letter(i)}{number}", kind, item.get(field), date_style)
             for i, (_n, field, kind) in enumerate(COLUMNS)
         )
         body.append(f'<row r="{number}" {span}>{cells}</row>')
@@ -447,7 +449,10 @@ def fill_template(
             if not ref:
                 raise QueryBuildError("Не удалось прочитать диапазон таблицы")
             header_row = int(ref.group(1))
-            new_sheet = _rewrite_sheet(src.read(sheet_file).decode("utf-8"), header_row, rows)
+            styles_xml, date_style = None, _DATE_STYLE
+            if "xl/styles.xml" in src.namelist():
+                styles_xml, date_style = _add_date_style(src.read("xl/styles.xml").decode("utf-8"))
+            new_sheet = _rewrite_sheet(src.read(sheet_file).decode("utf-8"), header_row, rows, date_style)
             new_table = _rewrite_table(table_xml, header_row, len(rows), header_row + len(rows))
             replaced = {sheet_file: new_sheet, table_file: new_table}
             if reference:
@@ -470,6 +475,8 @@ def fill_template(
                             variants[role].append(name)
                 replaced[ref_sheet_file], replaced[ref_table_file] = _rewrite_reference(
                     src.read(ref_sheet_file).decode("utf-8"), ref_table_xml, ref_row, roles, variants)
+            if styles_xml is not None:
+                replaced["xl/styles.xml"] = styles_xml
             with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as dst:
                 for info in src.infolist():
                     data = src.read(info.filename)
@@ -482,6 +489,21 @@ def fill_template(
             os.remove(tmp)
 
 
+def _add_date_style(styles_xml: str) -> tuple[str, int]:
+    """Добавляет в стили книги формат «дата» и возвращает (xml, индекс нового стиля).
+
+    Шаблон после пересохранения в Excel может потерять свой стиль даты или
+    иметь на этом индексе другой формат, поэтому свой стиль добавляем всегда.
+    """
+    m = re.search(r'<cellXfs count="(\d+)"\s*>(.*?)</cellXfs>', styles_xml, re.S)
+    if not m:
+        return styles_xml, _DATE_STYLE
+    count = int(m.group(1))
+    xf = '<xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+    return (styles_xml[:m.start()] + f'<cellXfs count="{count + 1}">' + m.group(2) + xf
+            + "</cellXfs>" + styles_xml[m.end():]), count
+
+
 def build_queries(
     file_ids: list[int],
     db_path: str | None = None,
@@ -489,12 +511,12 @@ def build_queries(
     out_dir: str | None = None,
     now: datetime | None = None,
     mode: str = MODE_BY_TYPE,
-    combined: dict[str, Any] | None = None,
+    vor_so: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Формирует по одной книге на каждый тип документа, для которого есть шаблон.
 
     В книгу типа попадают документы всех выбранных комплектов. В режиме
-    `MODE_COMBINED` из ВОР и СО выбранных файлов собирается одна общая книга.
+    `MODE_VOR_SO` из ВОР и СО выбранных файлов собирается одна общая книга.
 
     Файлы других типов, без CSV или с удалённым CSV пропускаются и попадают в
     `skipped` с причиной.
@@ -527,53 +549,92 @@ def build_queries(
     finally:
         connection.close()
 
-    if mode == MODE_COMBINED:
-        book = _build_combined(by_type, templates, combined or COMBINED_TEMPLATE, out_dir, stamp, db_path)
-        return {"books": [book], "skipped": skipped}
+    if mode == MODE_VOR_SO:
+        books = _build_vor_so(by_type, templates, vor_so or VOR_SO_TEMPLATE, out_dir, stamp, db_path)
+        return {"books": books, "skipped": skipped}
     if mode != MODE_BY_TYPE:
         raise QueryBuildError(f"Неизвестный режим: {mode}")
 
     books = []
     for doc_type, rows in by_type.items():
-        spec = templates[doc_type]
-        kit_keys = list(dict.fromkeys(r["kit_key"] for r in rows))
         output = os.path.join(out_dir, f"{doc_type}_{stamp}.xlsx")
-        reference, unresolved = None, []
-        if spec.get("ref_sheet"):
-            reference, unresolved = _reference_for(spec, doc_type, rows, db_path)
-        fill_template(spec["path"], output, rows, spec["sheet"], spec["table"], reference)
-        books.append({"doc_type": doc_type, "path": os.path.abspath(output),
-                      "kits": [{"code": k[0], "revision": k[1], "date": k[2]} for k in kit_keys],
-                      "files": len({r["file_id"] for r in rows}), "rows": len(rows),
-                      "unresolved_headers": unresolved,
-                      "ambiguous_versions": find_ambiguous_versions(rows)})
+        books.append(_build_type_book(doc_type, rows, templates, output, db_path))
     return {"books": books, "skipped": skipped}
 
 
-def _build_combined(by_type: dict[str, list[dict[str, Any]]], templates: dict[str, dict[str, str]],
-                    combined: dict[str, Any], out_dir: str, stamp: str, db_path: str | None) -> dict[str, Any]:
-    """Одна книга из шаблона ВОР+СО: список ВОР и список СО заполняются по очереди."""
+def _build_type_book(doc_type: str, rows: list[dict[str, Any]], templates: dict[str, dict[str, str]],
+                     output: str, db_path: str | None) -> dict[str, Any]:
+    """Книга одного типа документа из его шаблона: список CSV и (если есть) справочник колонок."""
+    spec = templates[doc_type]
+    kit_keys = list(dict.fromkeys(r["kit_key"] for r in rows))
+    reference, unresolved = None, []
+    if spec.get("ref_sheet"):
+        reference, unresolved = _reference_for(spec, doc_type, rows, db_path)
+    fill_template(spec["path"], output, rows, spec["sheet"], spec["table"], reference)
+    return {"doc_type": doc_type, "path": os.path.abspath(output),
+            "kits": [{"code": k[0], "revision": k[1], "date": k[2]} for k in kit_keys],
+            "files": len({r["file_id"] for r in rows}), "rows": len(rows),
+            "unresolved_headers": unresolved,
+            "ambiguous_versions": find_ambiguous_versions(rows)}
+
+
+def _build_vor_so(by_type: dict[str, list[dict[str, Any]]], templates: dict[str, dict[str, str]],
+                    vor_so: dict[str, Any], out_dir: str, stamp: str, db_path: str | None) -> list[dict[str, Any]]:
+    """Три файла с общим временем в имени: ВОР_, СО_ (по своим шаблонам) и общая книга, которая их читает.
+
+    Книга ВОР+СО - копия шаблона ВОР+СО; в таблицу «Параметры» записываются имена книг ВОР и СО (они лежат в той же
+    папке). Книги возвращаются в порядке ВОР, СО, ВОР+СО.
+    """
     vor_rows, so_rows = by_type.get(VOR, []), by_type.get(SPEC, [])
     missing = [name for name, rows in (("ВОР", vor_rows), ("СО", so_rows)) if not rows]
     if missing:
-        raise QueryBuildError("Для общей книги ВОР+СО нужны выбранные файлы с CSV обоих типов; нет: " + ", ".join(missing))
-    output = os.path.join(out_dir, f"{combined.get('label', 'ВОР+СО')}_{stamp}.xlsx")
-    middle = output + ".vor.tmp"
-    try:
-        reference, unresolved = _reference_for(templates[VOR], VOR, vor_rows, db_path)
-        fill_template(combined["path"], middle, vor_rows, combined[VOR]["sheet"], combined[VOR]["table"], reference)
-        fill_template(middle, output, so_rows, combined[SPEC]["sheet"], combined[SPEC]["table"])
-    finally:
-        if os.path.exists(middle):
-            os.remove(middle)
+        raise QueryBuildError("Для книги ВОР+СО ВОР+СО нужны выбранные файлы с CSV обоих типов; нет: " + ", ".join(missing))
+    paths = {doc_type: os.path.join(out_dir, f"{doc_type}_{stamp}.xlsx") for doc_type in (VOR, SPEC)}
+    vor_book = _build_type_book(VOR, vor_rows, templates, paths[VOR], db_path)
+    so_book = _build_type_book(SPEC, so_rows, templates, paths[SPEC], db_path)
+    output = os.path.join(out_dir, f"{vor_so.get('label', 'ВОР+СО')}_{stamp}.xlsx")
+    set_parameters(vor_so["path"], output, vor_so["params_sheet"],
+                   {vor_so["params_cells"][t]: os.path.basename(p) for t, p in paths.items()})
     rows = vor_rows + so_rows
     kit_keys = list(dict.fromkeys(r["kit_key"] for r in rows))
-    return {"doc_type": combined.get("label", "ВОР+СО"), "path": os.path.abspath(output),
-            "kits": [{"code": k[0], "revision": k[1], "date": k[2]} for k in kit_keys],
-            "files": len({r["file_id"] for r in rows}), "rows": len(rows),
-            "rows_by_type": {VOR: len(vor_rows), SPEC: len(so_rows)},
-            "unresolved_headers": unresolved,
-            "ambiguous_versions": find_ambiguous_versions(vor_rows) + find_ambiguous_versions(so_rows)}
+    vor_so_book = {"doc_type": vor_so.get("label", "ВОР+СО"), "path": os.path.abspath(output),
+                     "kits": [{"code": k[0], "revision": k[1], "date": k[2]} for k in kit_keys],
+                     "files": len({r["file_id"] for r in rows}), "rows": len(rows),
+                     "rows_by_type": {VOR: len(vor_rows), SPEC: len(so_rows)},
+                     "unresolved_headers": [], "ambiguous_versions": []}
+    return [vor_book, so_book, vor_so_book]
+
+
+def set_parameters(template: str, output: str, sheet: str, values: dict[str, str]) -> None:
+    """Копия книги, в которой на листе `sheet` текстовые ячейки `values` (адрес -> текст) получают новые значения."""
+    tmp = output + ".tmp"
+    os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
+    try:
+        with zipfile.ZipFile(template) as src:
+            sheet_file = _sheet_path(src, sheet)
+            xml = src.read(sheet_file).decode("utf-8")
+            for address, value in values.items():
+                # ячейка может быть inlineStr (сборка скриптом) или shared string (книгу пересохранил Excel)
+                pattern = re.compile(rf'<c r="{address}"((?:\s[^>]*?)?)(?:/>|>.*?</c>)', re.S)
+                if not pattern.search(xml):
+                    raise QueryBuildError(f"В шаблоне книги ВОР+СО нет ячейки {address} на листе «{sheet}»")
+
+                def _replace(m: re.Match, value: str = value, address: str = address) -> str:
+                    style = re.search(r'\ss="\d+"', m.group(1) or "")
+                    return (f'<c r="{address}"{style.group(0) if style else ""} t="inlineStr">'
+                            f'<is><t xml:space="preserve">{escape(value)}</t></is></c>')
+
+                xml = pattern.sub(_replace, xml, count=1)
+            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as dst:
+                for info in src.infolist():
+                    data = src.read(info.filename)
+                    if info.filename == sheet_file:
+                        data = xml.encode("utf-8")
+                    dst.writestr(info, data)
+        os.replace(tmp, output)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def _kit_label(kit_key: tuple) -> str:

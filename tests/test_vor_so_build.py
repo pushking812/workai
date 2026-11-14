@@ -1,4 +1,4 @@
-"""«Сформировать запросы» в режиме ВОР+СО: одна книга, два списка CSV."""
+﻿"""«Сформировать запросы» в режиме ВОР+СО: одна книга, два списка CSV."""
 
 from __future__ import annotations
 
@@ -40,52 +40,59 @@ def _add(db, tmp_path, name, doc_type, headers):
 
 
 @pytest.fixture()
-def combined(tmp_path, monkeypatch):
+def vor_so(tmp_path, monkeypatch):
     """Шаблон ВОР+СО без запросов (структура книги), собранный во временную папку."""
     monkeypatch.syspath_prepend(os.path.join(ROOT, "scripts"))
     monkeypatch.chdir(ROOT)
-    module = importlib.import_module("make_combined_template")
+    module = importlib.import_module("make_vor_so_template")
     target = str(tmp_path / "шаблон ВОР+СО.xlsx")
     monkeypatch.setattr(module, "TARGET", target)
     module.build()
-    return {**query_builder.COMBINED_TEMPLATE, "path": target}
+    return {**query_builder.VOR_SO_TEMPLATE, "path": target}
 
 
 def _rows(ws, table):
     return list(ws[ws.tables[table].ref])
 
 
-def test_combined_fills_both_lists(tmp_path, combined):
+def test_vor_so_makes_three_books(tmp_path, vor_so):
     db = str(tmp_path / "t.db")
     vor = _add(db, tmp_path, "a.docx", "ВОР", VOR_HEADERS)
     so1 = _add(db, tmp_path, "b.doc", "СО", SO_HEADERS)
     so2 = _add(db, tmp_path, "c.doc", "СО", SO_HEADERS)
     result = query_builder.build_queries(
-        [vor, so1, so2], db, out_dir=str(tmp_path / "out"), mode=query_builder.MODE_COMBINED, combined=combined)
-    assert len(result["books"]) == 1
-    book = result["books"][0]
-    assert book["doc_type"] == "ВОР+СО" and book["rows_by_type"] == {"ВОР": 1, "СО": 2}
-    assert os.path.basename(book["path"]).startswith("ВОР+СО_")
-    wb = openpyxl.load_workbook(book["path"])
-    assert len(_rows(wb["СписокВОР"], "СписокВОР")) == 2  # шапка и одна строка
-    so_rows = _rows(wb["СписокСО"], "СписокСО")
-    assert len(so_rows) == 3
+        [vor, so1, so2], db, out_dir=str(tmp_path / "out"), mode=query_builder.MODE_VOR_SO, vor_so=vor_so)
+    vor_book, so_book, book = result["books"]
+    assert [b["doc_type"] for b in result["books"]] == ["ВОР", "СО", "ВОР+СО"]
+    assert book["rows_by_type"] == {"ВОР": 1, "СО": 2}
+    names = [os.path.basename(b["path"]) for b in result["books"]]
+    stamp = names[0][len("ВОР_"):]
+    assert names == ["ВОР_" + stamp, "СО_" + stamp, "ВОР+СО_" + stamp]
+    assert len({os.path.dirname(b["path"]) for b in result["books"]}) == 1
+    # списки CSV заполнены в книгах ВОР и СО
+    vor_rows = _rows(openpyxl.load_workbook(vor_book["path"])["СписокВОР"], "СписокВОР")
+    so_rows = _rows(openpyxl.load_workbook(so_book["path"])["СписокСО"], "СписокСО")
+    assert len(vor_rows) == 2 and len(so_rows) == 3
     assert so_rows[1][3].value.endswith("_table_1.csv")
+    # общая книга: в «Параметры» имена двух других книг, строки 1 и 2 - шапка и значения
+    params = openpyxl.load_workbook(book["path"])["Параметры"]
+    assert [c.value for c in params[1]][:3] == ["Папка", "ФайлВОР", "ФайлСО"]
+    assert params["B2"].value == names[0] and params["C2"].value == names[1]
 
 
-def test_combined_needs_both_types(tmp_path, combined):
+def test_vor_so_needs_both_types(tmp_path, vor_so):
     db = str(tmp_path / "t.db")
     vor = _add(db, tmp_path, "a.docx", "ВОР", VOR_HEADERS)
     with pytest.raises(query_builder.QueryBuildError, match="СО"):
         query_builder.build_queries(
-            [vor], db, out_dir=str(tmp_path / "out"), mode=query_builder.MODE_COMBINED, combined=combined)
+            [vor], db, out_dir=str(tmp_path / "out"), mode=query_builder.MODE_VOR_SO, vor_so=vor_so)
 
 
-def test_controller_reports_combined_error(tmp_path, monkeypatch):
+def test_controller_reports_vor_so_error(tmp_path, monkeypatch):
     monkeypatch.setattr(query_builder, "QUERIES_DIR", str(tmp_path / "out"))
     db = str(tmp_path / "t.db")
     vor = _add(db, tmp_path, "a.docx", "ВОР", VOR_HEADERS)
-    result = Controller(db).build_queries([vor], opener=lambda p: None, mode="combined")
+    result = Controller(db).build_queries([vor], opener=lambda p: None, mode="vor_so")
     assert result["status"] == "error" and "СО" in result["message"]
 
 

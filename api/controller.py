@@ -14,7 +14,7 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
-from core import database, exports, header_dictionary, kits, query_builder
+from core import database, excel_refresh, exports, header_dictionary, kits, query_builder
 from core.statuses import FileStatus
 from core.search.manager import SearchManager
 from core.search.registrar import FileRegistrar
@@ -144,8 +144,9 @@ class Controller:
         """«Подготовить»: маппинг актуальных SAVED-файлов."""
         return {"status": "started", "queued": self.tasks.prepare_files(file_ids)}
 
-    def build_queries(self, file_ids: list[int], opener=None, mode: str = query_builder.MODE_BY_TYPE) -> dict[str, Any]:
-        """«Сформировать запросы»: копия шаблона по типу (`by_type`) или общая книга ВОР+СО (`combined`)."""
+    def build_queries(self, file_ids: list[int], opener=None, mode: str = query_builder.MODE_BY_TYPE,
+                      refresher=None) -> dict[str, Any]:
+        """«Сформировать запросы»: копия шаблона по типу (`by_type`) или общая книга ВОР+СО (`vor_so`)."""
         if not file_ids:
             return {"status": "error", "message": "Не выбрано ни одного файла"}
         try:
@@ -156,12 +157,34 @@ class Controller:
             reasons = "; ".join(sorted({s["reason"] for s in result["skipped"]})) or "нет подходящих файлов"
             return {"status": "error", "message": "Запросы не сформированы: " + reasons, **result}
         opener = opener or _open_in_system
-        for book in result["books"]:
+        to_open = result["books"]
+        refresh = None
+        if mode == query_builder.MODE_VOR_SO:
+            # ВОР и СО обновляются и сохраняются первыми, затем ВОР+СО (она читает их файлы); открывается только ВОР+СО.
+            refresher = refresher or excel_refresh.refresh_books
+            refresh = refresher([b["path"] for b in result["books"]])
+            if refresh["status"] == "ok":
+                to_open = result["books"][-1:]
+        for book in to_open:
             try:
                 opener(book["path"])
             except OSError:
                 pass  # книга создана; не открылась — путь есть в ответе
-        return {"status": "ok", **result}
+        out = {"status": "ok", **result}
+        if refresh is not None:
+            out["refresh"] = refresh
+        return out
+
+    def reconcile_report(self, opener=None, runner=None, folder: str | None = None) -> dict[str, Any]:
+        """«Отчёт ВОР+СО»: сверка итогов последнего комплекта книг и открытие файла."""
+        runner = runner or excel_refresh.make_reconcile_report
+        result = runner(folder or query_builder.QUERIES_DIR)
+        if result.get("status") == "ok":
+            try:
+                (opener or _open_in_system)(result["path"])
+            except OSError:
+                pass  # отчёт создан; путь есть в ответе
+        return result
 
     def check_headers(self, file_ids: list[int]) -> dict[str, Any]:
         """Перед «Сформировать запросы»: заголовки CSV без канонической роли."""
@@ -443,6 +466,10 @@ def prepare_selected(file_ids: list[int] | None = None) -> dict[str, Any]:
 
 def build_queries(file_ids: list[int], mode: str = query_builder.MODE_BY_TYPE) -> dict[str, Any]:
     return get_controller().build_queries(file_ids, mode=mode)
+
+
+def reconcile_report() -> dict[str, Any]:
+    return get_controller().reconcile_report()
 
 
 def check_headers(file_ids: list[int]) -> dict[str, Any]:

@@ -16,6 +16,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Workbook,
     [string]$OutDir = "data\exports\_pq_check",
     [int]$TimeoutSec = 600,
+    [hashtable]$Companions, # name in the temp folder -> source path: books the workbook reads (e.g. @{ "ВОР.xlsx" = "..." })
     [switch]$AllowRunning   # by default the script refuses to run while a user's Excel is open
 )
 
@@ -29,6 +30,9 @@ $tmpDir = Join-Path $env:TEMP ("pq_check_" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
 $copy = Join-Path $tmpDir "book.xlsx"
 Copy-Item -LiteralPath $src -Destination $copy
+if ($Companions) {
+    foreach ($k in $Companions.Keys) { Copy-Item -LiteralPath (Resolve-Path -LiteralPath $Companions[$k]).Path -Destination (Join-Path $tmpDir $k) }
+}
 
 $logPath = Join-Path $outFull "_refresh_log.txt"
 $log = New-Object System.Collections.Generic.List[string]

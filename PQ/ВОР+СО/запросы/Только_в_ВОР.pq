@@ -7,7 +7,11 @@ let
                "НаименованиеРабот", "ЕдИзм", "КолВо", "ДопКолВО", "NППСО", "Причина", "КлючСО"},
     ВорПоля = {"ШифрПроекта", "НомИзмПроекта", "ДатаИзм", "ИмяФайла", "Таблица", "Строка", "Раздел", "NПП",
                "НаименованиеРабот", "ЕдИзм", "КолВо", "ДопКолВО", "NППРДСО"},
-    Пары = Table.RenameColumns(Table.SelectColumns(ВОР_СвязьСО, {"ИдСтроки", "NПП", "КлючСО"}), {{"NПП", "NППСО"}}),
+    //  Строки ВОР, связанные с СО по наименованию (СвязьПоИмени, статус «по наименованию»), здесь не показываются:
+    //  они в Пересечении, а их ссылка на несуществующий номер СО - в Ошибках.
+    ПоИмени = Table.Distinct(Table.SelectColumns(Table.SelectRows(СвязьПоИмени, each [Статус] = "по наименованию"), {"ИдСтроки"})),
+    ПарыВсе = Table.RenameColumns(Table.SelectColumns(ВОР_СвязьИтог, {"ИдСтроки", "NПП", "КлючСО"}), {{"NПП", "NППСО"}}),
+    Пары = Table.RemoveColumns(Table.NestedJoin(ПарыВсе, {"ИдСтроки"}, ПоИмени, {"ИдСтроки"}, "п", JoinKind.LeftAnti), {"п"}),
 
     // 1) ссылки на пункты, которых нет в СО
     КлючиСО = Table.Distinct(Table.SelectColumns(СО_Строки, {"КлючСО"})),
@@ -18,13 +22,14 @@ let
     СПричиной1 = Table.AddColumn(НеНайденыВор, "Причина", each "пункт СО не найден", type text),
 
     // 2) строки без ссылок на СО
-    ИдСсылок = Table.Distinct(Table.SelectColumns(Пары, {"ИдСтроки"})),
+    ИдСсылок = Table.Distinct(Table.SelectColumns(ПарыВсе, {"ИдСтроки"})),
     БезСсылок = Table.RemoveColumns(
         Table.NestedJoin(ВОР_Строки, {"ИдСтроки"}, ИдСсылок, {"ИдСтроки"}, "п", JoinKind.LeftAnti), {"п"}),
     СПустымиКлючами = Table.AddColumn(Table.AddColumn(БезСсылок, "NППСО", each null, type text), "КлючСО", each null, type text),
     СПричиной2 = Table.AddColumn(СПустымиКлючами, "Причина", each "нет ссылки на СО", type text),
 
-    Итог = Table.ReorderColumns(
-        Table.Combine({Table.SelectColumns(СПричиной1, Колонки), Table.SelectColumns(СПричиной2, Колонки)}), Колонки)
+    Объединено = Table.ReorderColumns(
+        Table.Combine({Table.SelectColumns(СПричиной1, Колонки), Table.SelectColumns(СПричиной2, Колонки)}), Колонки),
+    Итог = Table.TransformColumnTypes(Объединено, {{"ДатаИзм", type date}, {"КолВо", type number}})
 in
     Итог

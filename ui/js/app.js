@@ -450,18 +450,18 @@ function confirmDialog(text) {
   });
 }
 
-// Выбор варианта «Сформировать запросы»: "by_type", "combined" или null (отмена).
+// Выбор варианта «Сформировать запросы»: "by_type", "vor_so" или null (отмена).
 function queriesModeDialog() {
   return new Promise((resolve) => {
     const popup = $("queries-mode-popup");
-    const buttons = ["queries-mode-by-type", "queries-mode-combined", "queries-mode-cancel"];
+    const buttons = ["queries-mode-by-type", "queries-mode-vor-so", "queries-mode-cancel"];
     const done = (answer) => {
       popup.hidden = true;
       buttons.forEach((id) => { $(id).onclick = null; });
       resolve(answer);
     };
     $("queries-mode-by-type").onclick = () => done("by_type");
-    $("queries-mode-combined").onclick = () => done("combined");
+    $("queries-mode-vor-so").onclick = () => done("vor_so");
     $("queries-mode-cancel").onclick = () => done(null);
     popup.hidden = false;
   });
@@ -708,6 +708,20 @@ function headersDialog(data) {
   });
 }
 
+// Отчёт ВОР+СО: последний комплект выбирается автоматически, выделение файлов не нужно.
+async function onReconcileReport() {
+  if (state.tasksRunning) return;
+  setStatus("Формирование отчёта ВОР+СО...", null);
+  const report = await api().reconcile_report();
+  if (report.status !== "ok") {
+    setStatus("Отчёт не сформирован", null);
+    showError(report.message || "Не удалось сформировать отчёт");
+    return;
+  }
+  setStatus("Отчёт сформирован: " + report.path, null);
+  if ((report.warnings || []).length) showError(report.warnings.join("\n"));
+}
+
 async function onBuildQueries() {
   if (state.tasksRunning) return;
   const ids = [...state.selected];
@@ -725,7 +739,7 @@ async function onBuildQueries() {
     const applied = await api().apply_header_decisions(decisions);
     if (applied.status !== "ok") showError("Не все решения применены:\n" + applied.errors.join("\n"));
   }
-  setStatus("Формирование запросов...", null);
+  setStatus(mode === "vor_so" ? "Формирование запросов и обновление данных в Excel (до нескольких минут)..." : "Формирование запросов...", null);
   const result = await api().build_queries(ids, mode);
   if (result.status !== "ok") {
     setStatus("Запросы не сформированы", null);
@@ -734,11 +748,24 @@ async function onBuildQueries() {
   }
   const rows = result.books.reduce((sum, b) => sum + b.rows, 0);
   const skipped = (result.skipped || []).length;
+  const issues = (result.refresh && result.refresh.status === "ok" && result.refresh.issues) || {};
+  const issueTotal = Object.values(issues).reduce((sum, n) => sum + n, 0);
+  let issueText = "";
+  if (result.refresh && result.refresh.status === "ok") {
+    issueText = issueTotal
+      ? `. Замечаний: ${issueTotal} (${Object.entries(issues).map(([k, n]) => `${k} ${n}`).join(", ")}). Подробности на листе «Ошибки» книги ВОР+СО`
+      : ". Замечаний нет";
+  }
   setStatus(`Запросы сформированы: книг ${result.books.length}, строк ${rows}` +
-    (skipped ? `, пропущено файлов ${skipped}` : ""), null);
+    (skipped ? `, пропущено файлов ${skipped}` : "") + issueText, null);
   const notes = [];
   if (skipped) {
     notes.push("Пропущены файлы:\n" + result.skipped.map((s) => `${s.filename}: ${s.reason}`).join("\n"));
+  }
+  if (result.refresh && result.refresh.status !== "ok" && result.refresh.status !== "unavailable") {
+    notes.push(result.refresh.status === "busy"
+      ? "Автообновление не выполнено: в системе открыт Excel. Закройте его или обновите книги вручную: сначала ВОР и СО (с сохранением), затем ВОР+СО."
+      : "Автообновление данных не удалось, книги открыты без обновления:\n" + (result.refresh.log || ""));
   }
   const ambiguous = result.books.flatMap((b) => b.ambiguous_versions || []);
   if (ambiguous.length) {
@@ -1249,6 +1276,7 @@ function bind() {
   el.add.addEventListener("click", onAdd);
   el.save.addEventListener("click", onSave);
   el.queries.addEventListener("click", onBuildQueries);
+  $("btn-report").addEventListener("click", onReconcileReport);
   el.hide.addEventListener("click", onHide);
   el.showHidden.addEventListener("click", onToggleHidden);
   el.exit.addEventListener("click", onExit);

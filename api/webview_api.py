@@ -72,6 +72,9 @@ class Api:
     def build_queries(self, file_ids, mode="by_type") -> dict[str, Any]:
         return controller.build_queries(file_ids, mode=mode)
 
+    def reconcile_report(self) -> dict[str, Any]:
+        return controller.reconcile_report()
+
     def check_headers(self, file_ids) -> dict[str, Any]:
         return controller.check_headers(file_ids)
 

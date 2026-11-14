@@ -128,16 +128,24 @@ def build() -> None:
     n = len(OUTPUT_COLUMNS)
     last = qb._col_letter(n - 1)
     head = _row(1, OUTPUT_COLUMNS, n)
+    # Формат даты: dxf на столбце таблицы и стиль ячейки первой строки (Excel переносит их на результат запроса)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from make_vor_so_template import _add_date_dxf  # noqa: E402
+    styles, date_style = qb._add_date_style(text("xl/styles.xml"))
+    styles, date_dxf = _add_date_dxf(styles)
+    files["xl/styles.xml"] = styles.encode("utf-8")
+    date_col = qb._col_letter(OUTPUT_COLUMNS.index("ДатаИзм"))
     sheet9 = text("xl/worksheets/sheet9.xml")
     widths = [46, 14, 14, 12, 50, 9, 8, 50, 40, 22, 18, 12, 12, 14, 30, 60][:n]
     widths += [14] * (n - len(widths))
     sheet9 = re.sub(r"<cols>.*?</cols>", lambda _m: _cols(widths), sheet9, count=1, flags=re.DOTALL)
     sheet9 = re.sub(r"<sheetData>.*?</sheetData>",
-                    lambda _m: f'<sheetData>{head}<row r="2" spans="1:{n}"/></sheetData>', sheet9, count=1, flags=re.DOTALL)
+                    lambda _m: f'<sheetData>{head}<row r="2" spans="1:{n}"><c r="{date_col}2" s="{date_style}"/></row></sheetData>', sheet9, count=1, flags=re.DOTALL)
     sheet9 = re.sub(r'<dimension\b[^>]*/>', f'<dimension ref="A1:{last}2"/>', sheet9, count=1)
     sheet9 = re.sub(r'<selection\b[^>]*/>', '<selection activeCell="A1" sqref="A1"/>', sheet9)
     files["xl/worksheets/sheet9.xml"] = sheet9.encode("utf-8")
-    tcols = "".join(f'<tableColumn id="{i}" uniqueName="{i}" name="{c}" queryTableFieldId="{i}"/>'
+    tcols = "".join(f'<tableColumn id="{i}" uniqueName="{i}" name="{c}" queryTableFieldId="{i}"'
+                    + (f' dataDxfId="{date_dxf}"' if c == "ДатаИзм" else "") + "/>"
                     for i, c in enumerate(OUTPUT_COLUMNS, 1))
     files["xl/tables/table9.xml"] = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
@@ -150,7 +158,7 @@ def build() -> None:
     files["xl/queryTables/queryTable6.xml"] = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         '<queryTable xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" name="ExternalData_1" '
-        'connectionId="21" autoFormatId="0" applyNumberFormats="0" applyBorderFormats="0" applyFontFormats="1" '
+        'connectionId="21" autoFormatId="0" applyNumberFormats="1" applyBorderFormats="0" applyFontFormats="1" '
         'applyPatternFormats="1" applyAlignmentFormats="0" applyWidthHeightFormats="0">'
         f'<queryTableRefresh preserveSortFilterLayout="0" nextId="{n + 1}"><queryTableFields count="{n}">{fields}'
         '</queryTableFields></queryTableRefresh></queryTable>').encode("utf-8")

@@ -215,15 +215,34 @@ let
                 else свёрнутая,
     Свёрнутые = if not Table.HasColumns(СРазделом, {"ИдСтроки", "NПП", "КолВо", "Примечание"}) or Table.IsEmpty(СРазделом) then СРазделом else
         let
-            ключи = List.Difference(Table.ColumnNames(СРазделом), СлужебныеПоля & {"Строка", "РазделНПП"}),
-            группы = Table.Group(СРазделом, ключи, {{"т", each _, type table}})
+            // Различающая метка в примечании (наземная/подземная часть, зона, этаж, секция) входит в ключ группы:
+            // такие строки с одним номером не склеиваются, иначе ВОР не сможет сопоставить свою часть.
+            метки = {"наземн", "подземн", "зона", "зоне", "этаж", "секци", "часть"},
+            меткаПрим = (п) => if п = null or Text.Trim(Text.From(п)) = "" then "" else
+                let н = Text.Lower(Text.Trim(Text.From(п))) in
+                    if List.AnyTrue(List.Transform(метки, each Text.Contains(н, _))) then н else "",
+            сМеткой = Table.AddColumn(СРазделом, "_МеткаПрим", each меткаПрим([Примечание]), type text),
+            ключи = List.Difference(Table.ColumnNames(сМеткой), СлужебныеПоля & {"Строка", "РазделНПП"}),
+            группы = Table.Group(сМеткой, ключи, {{"т", each _, type table}})
         in
-            Table.Combine(List.Transform(Table.Column(группы, "т"), each Свернуть(_))),
+            Table.RemoveColumns(Table.Combine(List.Transform(Table.Column(группы, "т"), each Свернуть(_))), {"_МеткаПрим"}),
 
     // Ключ связи с ВОР: ШифрПроекта | НомИзмПроекта | ДатаИзм (гггг-мм-дд) | NПП.
     // Тот же вид ключа строит запрос ВОР_СвязьСО в шаблоне ВОР.
     // Если ни один файл не прочитан, данных нет: остаются только строки с ошибками.
-    Данные = if not Table.HasColumns(СРазделом, "ИдСтроки") then #table({}, {}) else
+    // Если файлов нет, возвращается пустая таблица с полной схемой (типы колонок заданы), чтобы обновление
+    // проходило, а общая книга и сводные видели все поля, включая КолВо.
+    Схема = Начало & {"Проверка", "КлючСО"},
+    ПустаяТаблица = Table.TransformColumnTypes(#table(Схема, {}),
+        List.Transform(Схема, each {_, if _ = "КолВо" then type number else if _ = "ДатаИзм" then type nullable date else type text})),
+    // КолВо - число (десятичное): "1,5" и "1 000,5" разбираются, нечисловое значение становится null
+    ВЧисло = (т as table) as table =>
+        if not Table.HasColumns(т, "КолВо") then т else
+            Table.TransformColumns(т, {{"КолВо", each
+                if _ = null or Text.Trim(Text.From(_)) = "" then null
+                else try Number.FromText(Text.Replace(Text.Replace(Text.Replace(Text.Trim(Text.From(_)), " ", ""), "#(00A0)", ""), ",", "."), "en-US") otherwise null,
+                type nullable number}}),
+    Данные = if not Table.HasColumns(СРазделом, "ИдСтроки") then ПустаяТаблица else
         let
             КлючСО = Table.AddColumn(Свёрнутые, "КлючСО", each
                 (if [ШифрПроекта] = null then "" else [ШифрПроекта]) & "|"
@@ -232,9 +251,11 @@ let
                 & (if [NПП] = null then "" else Text.Trim(Text.From([NПП]))), type text),
             Порядок = Table.ReorderColumns(КлючСО, Начало, MissingField.Ignore)
         in
-            Table.ReorderColumns(Порядок, List.RemoveItems(Table.ColumnNames(Порядок), {"КлючСО"}) & {"КлючСО"}),
+            ВЧисло(Table.ReorderColumns(Порядок, List.RemoveItems(Table.ColumnNames(Порядок), {"КлючСО"}) & {"КлючСО"})),
 
     // Файлы, которые не удалось прочитать: строка с текстом ошибки
-    Итог = Table.Combine({Данные} & ОшибочныеТаблицы)
+    Объединено = Table.Combine({Данные} & ОшибочныеТаблицы),
+    // Table.Combine и Table.Group теряют тип колонки: задаём явно, иначе Excel не применит формат даты
+    Итог = Table.TransformColumnTypes(Объединено, {{"ДатаИзм", type nullable date}})
 in
     Итог

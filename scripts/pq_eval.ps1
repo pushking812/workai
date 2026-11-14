@@ -15,6 +15,7 @@ param(
     [Parameter(Mandatory = $true)][string]$FormulaFile,
     [Parameter(Mandatory = $true)][string]$OutFile,
     [int]$TimeoutSec = 300,
+    [hashtable]$Companions, # name in the temp folder -> source path: books the workbook reads
     [switch]$AllowRunning   # by default the script refuses to run while a user's Excel is open
 )
 
@@ -29,6 +30,9 @@ $tmpDir = Join-Path $env:TEMP ("pq_eval_" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
 $copy = Join-Path $tmpDir "book.xlsx"
 Copy-Item -LiteralPath $src -Destination $copy
+if ($Companions) {
+    foreach ($k in $Companions.Keys) { Copy-Item -LiteralPath (Resolve-Path -LiteralPath $Companions[$k]).Path -Destination (Join-Path $tmpDir $k) }
+}
 
 . "$PSScriptRoot\excel_session.ps1"
 try {

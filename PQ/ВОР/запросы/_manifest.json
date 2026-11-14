@@ -1,0 +1,69 @@
+{
+  "source": "шаблон ВОР.xlsx",
+  "queries": [
+    {
+      "name": "Prefix",
+      "file": "Prefix.pq"
+    },
+    {
+      "name": "fnParseChertezhi",
+      "file": "fnParseChertezhi.pq"
+    },
+    {
+      "name": "fnParseSpec",
+      "file": "fnParseSpec.pq"
+    },
+    {
+      "name": "fnOnlyAllowedChars",
+      "file": "fnOnlyAllowedChars.pq"
+    },
+    {
+      "name": "fnRenameToCanonical",
+      "file": "fnRenameToCanonical.pq"
+    },
+    {
+      "name": "fnSplitReferences",
+      "file": "fnSplitReferences.pq"
+    },
+    {
+      "name": "СправочникКолонок",
+      "file": "СправочникКолонок.pq"
+    },
+    {
+      "name": "СписокФайлов",
+      "file": "СписокФайлов.pq"
+    },
+    {
+      "name": "ЗадатьДиректорию",
+      "file": "ЗадатьДиректорию.pq"
+    },
+    {
+      "name": "РабочаяДиректория",
+      "file": "РабочаяДиректория.pq"
+    },
+    {
+      "name": "ФайлBinary",
+      "file": "ФайлBinary.pq"
+    },
+    {
+      "name": "fnReadCsv",
+      "file": "fnReadCsv.pq"
+    },
+    {
+      "name": "fnParseChertezhiLines",
+      "file": "fnParseChertezhiLines.pq"
+    },
+    {
+      "name": "ВОР_База",
+      "file": "ВОР_База.pq"
+    },
+    {
+      "name": "ВОР_СвязьРД",
+      "file": "ВОР_СвязьРД.pq"
+    },
+    {
+      "name": "ВОР_СвязьСО",
+      "file": "ВОР_СвязьСО.pq"
+    }
+  ]
+}

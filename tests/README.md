@@ -4,7 +4,7 @@
 
     $env:PYTHONUTF8=1; & $env:TEMP\workai_venv\Scripts\python.exe -m pytest -q
 
-Один файл: `... -m pytest -q tests/test_so_share.py`. Последний полный прогон: 338 прошли, 2 пропущены (нет эталона `АПТ` и СВОР ЭС2 в `test_numbering_fix.py`). После правки мер модели ВОР+СО (2026-11-15) полный прогон не повторялся, см. `docs/backlog.md`.
+Один файл: `... -m pytest -q tests/test_so_share.py`. Последний полный прогон (2026-11-15, коммит `6689639`): 339 прошли, 2 пропущены (нет эталона `АПТ` и СВОР ЭС2 в `test_numbering_fix.py`).
 
 Excel и Word тесты не запускают: обращение к ним подменяется. Часть тестов читает реальные документы из `РД/` (поиск по имени); если файла нет, тест пропускается или падает с понятным сообщением. Не удаляйте такие тесты, чините пути.
 
@@ -34,8 +34,10 @@ Excel и Word тесты не запускают: обращение к ним �
 - `test_so_share.py`, `test_key_without_date.py`, `test_name_match.py`, `test_shift_hint.py`, `test_so_collapse_label.py`, `test_spec_in_name.py` — тексты запросов `.pq` и правила в них: доля СО, ключ с датой и без неё, связь по наименованию, подсказка о сдвиге ссылки, метка примечания при склейке СО, позиции СО в наименовании ВОР.
 - `test_excel_refresh.py` — автообновление книг (`core/excel_refresh.py`), Excel подменяется.
 - `test_reconcile_report_api.py` — кнопка «Отчет ВОР+СО» (`Controller.reconcile_report`), скрипт отчёта подменяется.
+- `test_reconcile_totals_empty_link.py` — `reconcile_totals.py` на книге с пустым листом `Связь_ВОР_СО` (одна пустая ячейка): суммы берутся из сводной.
+- Сверка Python-эталона с запросом `Связь_ВОР_СО` на реальных комплектах делается скриптом `scripts/compare_allocation.py`, не pytest.
 
 ## Чего нет
-- Нет тестов для `scripts/make_reconcile.py`, `reconcile_totals.py`, `reconcile_to_xlsx.py` (в бэклоге).
+- Нет тестов для `scripts/make_reconcile.py` и `reconcile_to_xlsx.py`; `reconcile_totals.py` покрыт только случаем пустого листа связи (в бэклоге).
 - Запросы `.pq` проверяются по тексту и на синтетике; настоящее обновление в Excel делают скрипты `scripts/pq_refresh_check.ps1`, `scripts/run_kit_check.py`, а не pytest.
 - Меры модели ВОР+СО (DAX) тестами не проверяются: их применяет `scripts/apply_model_measures.ps1`, проверка в Excel вручную.

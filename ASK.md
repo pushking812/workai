@@ -43,5 +43,6 @@
 - Этап 3 (бэкенд): `core/search/`, `api/controller.py`, описание в `docs/stage3.md`. Этап 1: `docs/stage1.md`.
 
 ## Состояние тестов
-- Последний полный прогон: 338 passed, 2 skipped (нет эталона `АПТ` и СВОР ЭС2 в `test_numbering_fix.py`). После правки мер полный прогон не делался (бэклог).
-- Последний коммит на момент записи: `d04cbff`.
+- Последний полный прогон: 339 passed, 2 skipped (нет эталона `АПТ` и СВОР ЭС2 в `test_numbering_fix.py`).
+- Последний коммит на момент записи: `6689639`.
+- Решение: PQ остаётся витриной, на Python не переходим. Python-эталон `core/so_allocation.py` (`allocate_detail`) сверен с `Связь_ВОР_СО.pq` скриптом `scripts/compare_allocation.py`, 0 расхождений. Заметки: `.ask-memory/decision_pq_vs_python.md`.

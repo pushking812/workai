@@ -64,8 +64,20 @@ def _eq(a, b):
 
 
 def allocate(vor, so):
+    shares, notes, _ = allocate_detail(vor, so)
+    return [(i, j, s) for i, j, s, *_ in shares], notes
+
+
+def allocate_detail(vor, so):
+    """То же, что allocate, но с видом каждой пары: ([(i, j, доля, вид, оценка)], замечания, сведения).
+
+    вид: один, единицы, операция, доля, объём, вручную, без. Сведения: статус, сравнимо, справочно по паре (i, j)
+    (зеркало СтатусПары, Сравнимо и СО_Справочно запроса Связь_ВОР_СО.pq).
+    """
     nv, ns = len(vor), len(so)
     notes = []
+    kinds = {}
+    no_num = set()
     vw = [set(words(v["name"])) for v in vor]
     sw = [set(words(s["name"] + " " + s.get("note", ""))) for s in so]
     common = set.intersection(*sw) if sw else set()
@@ -85,6 +97,7 @@ def allocate(vor, so):
             for i in range(nv):
                 comp[i][j] = True
             notes.append(("числа не совпали", None, j))
+            no_num.add(j)
 
     def score(i, j):
         d = dist[j]
@@ -107,11 +120,13 @@ def allocate(vor, so):
         if not same:
             # единицы ВОР и СО разные: сравнивать объёмы нельзя; объём СО (для итога) получает первая строка
             shares[(cand[0], j)] = 1.0
+            kinds[(cand[0], j)] = "единицы"
             notes.append(("единицы разные", cand[0], j))
             continue
         cand = same
         if len(cand) == 1:
             shares[(cand[0], j)] = 1.0
+            kinds[(cand[0], j)] = "один"
             continue
         kols = [vor[i].get("kol") for i in cand]
         sk = so[j].get("kol")
@@ -120,26 +135,61 @@ def allocate(vor, so):
         if have and one_section and all(_eq(k, sk) for k in kols):
             # операции над одним материалом: объём СО учтён один раз (первая строка), остальным справочно
             shares[(cand[0], j)] = 1.0
+            kinds[(cand[0], j)] = "операция"
             for i in cand[1:]:
                 shares[(i, j)] = 0.0
+                kinds[(i, j)] = "операция"
                 notes.append(("операция", i, j))
         elif have and one_section and _eq(sum(kols), sk):
             tot = sum(kols)
             for i, k in zip(cand, kols):
                 shares[(i, j)] = k / tot
+                kinds[(i, j)] = "доля"
             notes.append(("доля по КолВо", None, j))
         elif have and sum(_eq(k, sk) for k in kols) == 1:
             win = cand[[_eq(k, sk) for k in kols].index(True)]
             shares[(win, j)] = 1.0
+            kinds[(win, j)] = "объём"
             notes.append(("по объёму", win, j))
         else:
             shares[(cand[0], j)] = 1.0
+            kinds[(cand[0], j)] = "вручную"
             notes.append(("проверить вручную", cand[0], j))
     got = {i for i, _ in shares}
     for i in range(nv):
         if i not in got and ns:
             j = max(range(ns), key=lambda k: sc[i][k])
             shares[(i, j)] = 0.0
+            kinds[(i, j)] = "без"
             diff = _unit(vor[i]["ed"]) != _unit(so[j]["ed"])
             notes.append(("нет аналога: другая единица" if diff else "ВОР без доли СО", i, j))
-    return sorted((i, j, s) for (i, j), s in shares.items()), notes
+
+    def status(i, j, share, kind):
+        if kind == "операция":
+            return "операция над тем же материалом"
+        if kind == "без" and _unit(vor[i]["ed"]) != _unit(so[j]["ed"]):
+            return "нет аналога (другая единица)"
+        if share == 0:
+            return "ВОР без доли"
+        if ns == 1 and (nv == 1 or kind == "один"):
+            return "единственная"
+        if ns > 1 and not dist[j]:
+            return "дубль в СО"
+        for k, text in (("доля", "доля по КолВо"), ("единицы", "единицы разные"),
+                        ("объём", "по объёму"), ("вручную", "проверить вручную")):
+            if kind == k:
+                return text
+        if sc[i][j] >= 1:
+            return "точно"
+        if j in no_num:
+            return "числа не совпали"
+        return "нечётко" if sc[i][j] > 0 else "по остатку"
+
+    out, info = [], {}
+    for (i, j), s in sorted(shares.items()):
+        kind = kinds[(i, j)]
+        score_ = None if (not dist[j] or sc[i][j] < 0) else sc[i][j]
+        out.append((i, j, s, kind, score_))
+        info[(i, j)] = {"status": status(i, j, s, kind), "score": score_, "comparable": 0 if kind == "без" else 1,
+                        "ref": so[j].get("kol") if kind == "операция" else None}
+    return out, notes, info

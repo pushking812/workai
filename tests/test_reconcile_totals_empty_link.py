@@ -45,4 +45,4 @@ def _check(tmp_path, link_rows):
     p = subprocess.run([sys.executable, "-I", "-X", "utf8", str(SCRIPT), str(tmp_path)],
                        capture_output=True, text=True, encoding="utf-8")
     assert "IndexError" not in p.stderr, p.stderr[-500:]
-    assert "нет листа Связь_ВОР_СО" in p.stdout, p.stdout + p.stderr[-500:]
+    assert "суммы взяты из сводной" in p.stdout, p.stdout + p.stderr[-500:]

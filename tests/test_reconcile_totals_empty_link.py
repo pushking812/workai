@@ -19,12 +19,22 @@ def _book(path, sheets):
 
 
 def test_empty_link_sheet_falls_back_to_pivot(tmp_path):
+    _check(tmp_path, [[None]])
+
+
+def test_truncated_link_sheet_falls_back_to_pivot(tmp_path):
+    """Лист связи с урезанным набором столбцов (8 из 34) не используется."""
+    _check(tmp_path, [["Шифр", "NПП", "КолВо", "ЕдИзм", "НаименованиеРабот", "Раздел", "ДатаИзм", "НомИзм"],
+                      ["x", 1, 5, "шт", "Кабель", "r", None, 0]])
+
+
+def _check(tmp_path, link_rows):
     vor_head = [["НаименованиеРабот", "КолВо", "ЕдИзм"]]
     so_head = [["НаименованиеИТехХар", "КолВо", "ЕдИзм"]]
     _book(tmp_path / "v.xlsx", {"ФайлBinary": vor_head})
     _book(tmp_path / "s.xlsx", {"ФайлBinary": so_head})
     _book(tmp_path / "c.xlsx", {
-        "Связь_ВОР_СО": [[None]],
+        "Связь_ВОР_СО": link_rows,
         "Сводная": [["Названия строк", "СуммаВОР", "СуммаСО", "СтатусСвязи"],
                     ["Кабель", None, None, None],
                     ["Кабель КСВВ", 10, 10, "точно"],

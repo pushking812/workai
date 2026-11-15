@@ -28,21 +28,32 @@ def test_truncated_link_sheet_falls_back_to_pivot(tmp_path):
                       ["x", 1, 5, "шт", "Кабель", "r", None, 0]])
 
 
+def test_filtered_pivot_stops_with_error(tmp_path):
+    p = _run(tmp_path, [[None]], pivot_filter=("Система", "СОУЭ 1"))
+    assert p.returncode != 0
+    assert "включён фильтр" in p.stderr, p.stdout + p.stderr[-500:]
+
+
 def _check(tmp_path, link_rows):
+    p = _run(tmp_path, link_rows)
+    assert "IndexError" not in p.stderr, p.stderr[-500:]
+    assert "суммы взяты из сводной" in p.stdout, p.stdout + p.stderr[-500:]
+
+
+def _run(tmp_path, link_rows, pivot_filter=None):
     vor_head = [["НаименованиеРабот", "КолВо", "ЕдИзм"]]
     so_head = [["НаименованиеИТехХар", "КолВо", "ЕдИзм"]]
     _book(tmp_path / "v.xlsx", {"ФайлBinary": vor_head})
     _book(tmp_path / "s.xlsx", {"ФайлBinary": so_head})
     _book(tmp_path / "c.xlsx", {
         "Связь_ВОР_СО": link_rows,
-        "Сводная": [["Названия строк", "СуммаВОР", "СуммаСО", "СтатусСвязи"],
+        "Сводная": ([list(pivot_filter) + [None, None]] if pivot_filter else []) + [
+                    ["Названия строк", "СуммаВОР", "СуммаСО", "СтатусСвязи"],
                     ["Кабель", None, None, None],
                     ["Кабель КСВВ", 10, 10, "точно"],
                     ["Общий итог", 10, 10, None]],
         "Только_в_ВОР": [["НаименованиеРабот", "КолВо", "ЕдИзм"]],
         "Только_в_СО": [["НаименованиеИТехХар", "КолВо", "ЕдИзм"]],
     })
-    p = subprocess.run([sys.executable, "-I", "-X", "utf8", str(SCRIPT), str(tmp_path)],
-                       capture_output=True, text=True, encoding="utf-8")
-    assert "IndexError" not in p.stderr, p.stderr[-500:]
-    assert "суммы взяты из сводной" in p.stdout, p.stdout + p.stderr[-500:]
+    return subprocess.run([sys.executable, "-I", "-X", "utf8", str(SCRIPT), str(tmp_path)],
+                          capture_output=True, text=True, encoding="utf-8")

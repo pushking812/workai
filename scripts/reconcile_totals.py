@@ -65,7 +65,8 @@ if ("Связь_ВОР_СО" not in c.sheetnames or c["Связь_ВОР_СО"].
     hdr = next((i for i, r in enumerate(srows) if r[0] == "Названия строк"), 2)
     for r in srows[:hdr]:
         if r[0] and r[1] not in (None, "All", "(Все)"):
-            print("ВНИМАНИЕ: фильтр сводной", r[0], "=", r[1], "- итоги неполные")
+            sys.exit("ОШИБКА: в сводной включён фильтр " + str(r[0]) + " = " + str(r[1])
+                     + ". Снимите фильтр, обновите и сохраните книгу ВОР+СО, иначе итоги неполные.")
     for r in srows[hdr + 1:]:
         name, b, s, p = r[:4]
         if name is None or name == "Общий итог":

@@ -349,6 +349,13 @@ def main() -> int:
            "--add", "--prune"]
     code = subprocess.call(cmd)
     shutil.rmtree(WORK, ignore_errors=True)
+    if code == 0 and "--pivot" in sys.argv:
+        # Сводная таблица создаётся в настоящем Excel (COM): сам запускает и закрывает свой Excel.
+        tmp = TARGET + ".pivot.xlsx"
+        code = subprocess.call(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                                os.path.join("scripts", "add_pivot.ps1"), "-Workbook", TARGET, "-Out", tmp])
+        if code == 0:
+            os.replace(tmp, TARGET)
     folder = os.path.dirname(TARGET)
     for leftover in (os.path.join(folder, "шаблон ВОР+СО.bak.xlsx"), os.path.join(folder, "_import_report.xlsx")):
         if os.path.exists(leftover):

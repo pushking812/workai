@@ -12,7 +12,8 @@ import os
 import sqlite3
 from typing import Any, Iterable
 
-DB_PATH = os.path.join("data", "app.db")
+# Путь от корня проекта, а не от папки запуска: иначе из другой папки открывается чужая (пустая) БД.
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "app.db")
 SCHEMA_VERSION = 8
 # Версия, добавившая блок «Маркировка кабелей» (V7_KZH_NAMES).
 SYNONYMS_V7_VERSION = 7

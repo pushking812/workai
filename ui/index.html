@@ -95,10 +95,20 @@
         Периодичность фонового поиска, мин:
         <input type="number" id="input-interval" min="1" max="1440" step="1" value="60">
       </label>
+      <div class="dict-head">AI-модель</div>
+      <label class="kits-all" title="В сложных случаях и для подтверждения решений алгоритма документ или фрагмент отправляется на внешний сервер модели">
+        <input type="checkbox" id="chk-use-ai"> Использовать AI (данные уходят на внешний сервер)
+      </label>
+      <label class="interval-row">
+        ASK_API_KEY:
+        <input type="password" id="input-ai-key" autocomplete="off" placeholder="sk-ask-…" style="width: 260px">
+      </label>
+      <div id="ai-key-state" class="muted"></div>
       <div class="popup-actions settings-actions">
         <button id="btn-types" title="Известные типы документов и скрытие неизвестных">Типы документов…</button>
         <button id="btn-folders" title="В каких вложенных папках искать документы">Фильтр папок…</button>
         <button id="btn-dictionary" title="Канонические заголовки, синонимы и игнорируемые заголовки">Справочник заголовков…</button>
+        <button id="btn-reference" title="Справочник зданий, этажей и помещений">Помещения…</button>
         <button id="btn-clear-db" class="danger-btn" title="Удалить все записи о файлах и все CSV">Очистить базу данных</button>
         <button id="settings-close" class="primary">Закрыть</button>
       </div>
@@ -211,6 +221,81 @@
     </div>
   </div>
 
+  <div id="ref-popup" class="popup" hidden>
+    <div class="popup-body wide">
+      <div class="popup-title settings-title">Справочник помещений</div>
+      <div class="muted">Код меняется везде, где он используется. Значение, которое используется (есть этажи, помещения или записи в других таблицах), удалить нельзя.</div>
+      <div class="dict-layout">
+        <div class="dict-col">
+          <div class="dict-head">Здания</div>
+          <input type="text" id="ref-filter-buildings" class="ref-filter" placeholder="Фильтр…">
+          <ul id="ref-buildings" class="dict-list"></ul>
+          <div class="ref-fields">
+            <div class="ref-line">
+              <input type="text" id="ref-b-code" class="ref-short" maxlength="5" placeholder="Код" title="Короткое название, например ФСТ">
+              <input type="text" id="ref-b-full" placeholder="Полное название">
+            </div>
+          </div>
+          <div class="dict-row">
+            <button id="ref-b-add" class="icon-btn" title="Добавить здание">＋</button>
+            <button id="ref-b-save" class="icon-btn" title="Сохранить изменения выбранного здания">✎</button>
+            <button id="ref-b-delete" class="icon-btn danger-btn" title="Удалить выбранное здание">🗑</button>
+          </div>
+        </div>
+        <div class="dict-col">
+          <div class="dict-head" id="ref-floors-head">Этажи</div>
+          <input type="text" id="ref-filter-floors" class="ref-filter" placeholder="Фильтр…">
+          <ul id="ref-floors" class="dict-list"></ul>
+          <div class="ref-fields">
+            <div class="ref-line">
+              <input type="text" id="ref-f-code" class="ref-short" maxlength="5" placeholder="Код" title="Код этажа, например Э1">
+              <input type="text" id="ref-f-name" placeholder="Название">
+            </div>
+            <div class="ref-line">
+              <select id="ref-f-ground" class="ref-sel ref-fill" title="Наземный или подземный">
+                <option value="">не задан</option>
+                <option value="наземный">наземный</option>
+                <option value="подземный">подземный</option>
+              </select>
+            </div>
+          </div>
+          <div class="dict-row">
+            <button id="ref-f-add" class="icon-btn" title="Добавить этаж в выбранное здание">＋</button>
+            <button id="ref-f-save" class="icon-btn" title="Сохранить изменения выбранного этажа">✎</button>
+            <button id="ref-f-delete" class="icon-btn danger-btn" title="Удалить выбранный этаж">🗑</button>
+          </div>
+        </div>
+        <div class="dict-col">
+          <div class="dict-head" id="ref-rooms-head">Помещения</div>
+          <input type="text" id="ref-filter-rooms" class="ref-filter" placeholder="Фильтр…">
+          <ul id="ref-rooms" class="dict-list"></ul>
+          <div class="ref-fields">
+            <div class="ref-line">
+              <input type="text" id="ref-r-code" class="ref-short" placeholder="Код" title="Код помещения">
+              <input type="text" id="ref-r-area" class="ref-short" readonly tabindex="-1" placeholder="м²" title="Площадь, м² (из экспликации, не редактируется)">
+              <select id="ref-r-ground" class="ref-sel ref-fill" title="Пусто — берётся от этажа">
+                <option value="">как у этажа</option>
+                <option value="наземный">наземный</option>
+                <option value="подземный">подземный</option>
+              </select>
+            </div>
+            <input type="text" id="ref-r-name" placeholder="Название">
+          </div>
+          <div class="dict-row">
+            <button id="ref-r-add" class="icon-btn" title="Добавить помещение на выбранный этаж">＋</button>
+            <button id="ref-r-save" class="icon-btn" title="Сохранить изменения выбранного помещения">✎</button>
+            <button id="ref-r-delete" class="icon-btn danger-btn" title="Удалить выбранное помещение">🗑</button>
+          </div>
+        </div>
+      </div>
+      <div class="popup-actions">
+        <button id="ref-export" title="Выгрузить справочник в Excel: листы Здания, Этажи, Помещения">Выгрузить в xlsx…</button>
+        <button id="ref-import" title="Загрузить справочник из Excel: добавляет и обновляет, ничего не удаляет">Загрузить из xlsx…</button>
+        <button id="ref-close" class="primary">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
   <div id="confirm-popup" class="popup" hidden>
     <div class="popup-body small">
       <div id="confirm-text" class="confirm-text"></div>
@@ -237,7 +322,7 @@
 
   <div id="error-popup" class="popup" hidden>
     <div class="popup-body">
-      <div class="popup-title">Ошибка</div>
+      <div class="popup-title" id="error-title">Ошибка</div>
       <pre id="error-text"></pre>
       <button id="error-close">Закрыть</button>
     </div>

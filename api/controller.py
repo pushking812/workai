@@ -14,7 +14,7 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
-from core import database, excel_refresh, exports, header_dictionary, kits, query_builder
+from core import database, excel_refresh, exports, header_dictionary, kits, query_builder, reference_exchange, reference_store
 from core.statuses import FileStatus
 from core.search.manager import SearchManager
 from core.search.registrar import FileRegistrar
@@ -252,6 +252,70 @@ class Controller:
             connection.close()
         return self.get_dictionary()
 
+    def get_reference(self) -> dict[str, Any]:
+        connection = database.init_db(self.db_path)
+        try:
+            return {"status": "ok", **reference_store.list_reference(connection)}
+        finally:
+            connection.close()
+
+    def edit_reference(self, op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Правка справочника помещений: add_/update_/delete_ + building, floor, room."""
+        a = args or {}
+        rs = reference_store
+        operations = {
+            "add_building": lambda c: rs.add_building(c, a.get("code"), a.get("name"), a.get("full")),
+            "update_building": lambda c: rs.update_building(c, a.get("id"), a.get("code"), a.get("name"), a.get("full")),
+            "delete_building": lambda c: rs.delete_building(c, a.get("id")),
+            "add_floor": lambda c: rs.add_floor(c, a.get("building_id"), a.get("code"), a.get("name"), a.get("ground")),
+            "update_floor": lambda c: rs.update_floor(c, a.get("id"), a.get("code"), a.get("name"), a.get("ground")),
+            "delete_floor": lambda c: rs.delete_floor(c, a.get("id")),
+            "add_room": lambda c: rs.add_room(c, a.get("floor_id"), a.get("code"), a.get("name"), a.get("ground")),
+            "update_room": lambda c: rs.update_room(c, a.get("id"), a.get("code"), a.get("name"), a.get("ground")),
+            "delete_room": lambda c: rs.delete_room(c, a.get("id")),
+        }
+        if op not in operations:
+            return {"status": "error", "message": f"Неизвестная операция: {op}"}
+        connection = database.init_db(self.db_path)
+        try:
+            operations[op](connection)
+        except reference_store.ReferenceError_ as exc:
+            return {"status": "error", "message": str(exc)}
+        finally:
+            connection.close()
+        return self.get_reference()
+
+    def export_reference(self, path: str) -> dict[str, Any]:
+        """Выгрузка справочника в xlsx (листы Здания, Этажи, Помещения)."""
+        if not path:
+            return {"status": "cancelled"}
+        if not str(path).lower().endswith(".xlsx"):
+            path = f"{path}.xlsx"
+        connection = database.init_db(self.db_path)
+        try:
+            counts = reference_exchange.export_xlsx(connection, path)
+        except OSError as exc:
+            return {"status": "error", "message": f"Не удалось записать файл: {exc}"}
+        finally:
+            connection.close()
+        return {"status": "ok", "path": path, **counts}
+
+    def import_reference(self, path: str) -> dict[str, Any]:
+        """Загрузка справочника из xlsx: добавляет и обновляет, ничего не удаляет."""
+        if not path:
+            return {"status": "cancelled"}
+        connection = database.init_db(self.db_path)
+        try:
+            result = reference_exchange.import_xlsx(connection, path)
+        except reference_store.ReferenceError_ as exc:
+            return {"status": "error", "message": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - битый файл, нет листа и т.п.
+            return {"status": "error", "message": f"Не удалось прочитать файл: {exc}"}
+        finally:
+            connection.close()
+        return {"status": "ok", "added": result["added"], "updated": result["updated"],
+                "reference": self.get_reference()}
+
     def stop_tasks(self) -> dict[str, Any]:
         self.tasks.stop()
         return {"status": "stopping"}
@@ -486,3 +550,19 @@ def get_dictionary() -> dict[str, Any]:
 
 def edit_dictionary(op: str, args=None) -> dict[str, Any]:
     return get_controller().edit_dictionary(op, args)
+
+
+def get_reference() -> dict[str, Any]:
+    return get_controller().get_reference()
+
+
+def edit_reference(op: str, args=None) -> dict[str, Any]:
+    return get_controller().edit_reference(op, args)
+
+
+def export_reference(path) -> dict[str, Any]:
+    return get_controller().export_reference(path)
+
+
+def import_reference(path) -> dict[str, Any]:
+    return get_controller().import_reference(path)

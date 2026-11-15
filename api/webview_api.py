@@ -41,10 +41,10 @@ class Api:
         )
 
     def get_settings(self) -> dict[str, Any]:
-        return config.load_config()
+        return config.public_view(config.load_config())
 
     def save_settings(self, settings) -> dict[str, Any]:
-        return config.save_config(settings or {})
+        return config.public_view(config.save_config(settings or {}))
 
     def stop_search(self) -> dict[str, Any]:
         return controller.stop_search()
@@ -86,6 +86,38 @@ class Api:
 
     def edit_dictionary(self, op, args=None) -> dict[str, Any]:
         return controller.edit_dictionary(op, args)
+
+    def get_reference(self) -> dict[str, Any]:
+        return controller.get_reference()
+
+    def edit_reference(self, op, args=None) -> dict[str, Any]:
+        return controller.edit_reference(op, args)
+
+    def export_reference(self) -> dict[str, Any]:
+        """Диалог «Сохранить как» и выгрузка справочника в xlsx."""
+        import webview
+
+        window = _first_window()
+        if window is None:
+            return {"status": "cancelled"}
+        path = window.create_file_dialog(
+            _dialog_kind(webview, "SAVE"), save_filename="Справочник помещений.xlsx",
+            file_types=("Excel (*.xlsx)",))
+        if not path:
+            return {"status": "cancelled"}
+        return controller.export_reference(path if isinstance(path, str) else path[0])
+
+    def import_reference(self) -> dict[str, Any]:
+        """Диалог выбора xlsx и загрузка справочника."""
+        import webview
+
+        window = _first_window()
+        if window is None:
+            return {"status": "cancelled"}
+        paths = window.create_file_dialog(_dialog_kind(webview, "OPEN"), file_types=("Excel (*.xlsx)",))
+        if not paths:
+            return {"status": "cancelled"}
+        return controller.import_reference(paths[0])
 
     def stop_tasks(self) -> dict[str, Any]:
         return controller.stop_tasks()

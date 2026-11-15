@@ -198,3 +198,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pq_eval.ps1 -Workboo
 Ищет в таблицах `.docx` строки, где номер записан со скобкой (`18)`), и показывает, есть ли у такой таблицы шапка. Отчёт `paren_<папка>.xlsx`.
 
     python scripts/probe_paren.py [--out папка] [папка, по умолчанию ВОР]
+
+## Помещения и справочник (подробно: `docs/rooms.md`)
+
+### rooms_to_excel.py
+Сводит PDF-экспликации из `ДопФайлы\Помещения` в `data/exports/Помещения.xlsx` (листы «Помещения», «Проверка», «Файлы», «Сверка_CSV», «Сверка_AI»). Ключ `--ocr_with_ai`: файлы без текстового слоя целиком уходят в модель (нужен ключ `ASK_API_KEY` или `ai_api_key` в `data/config.json`).
+
+    python -m scripts.rooms_to_excel
+
+### ai_check_list.py
+Собирает помещения, по которым расходятся источники, в `data/exports/Помещения_AI_проверить.xlsx` для проверки.
+
+### merge_rooms_into_reference.py
+Переносит `Помещения.xlsx` в `spravochniki.xlsx` и в справочник БД: новые этажи и помещения, площади, названия только вместо пустых (прочерк = пусто). `ЗДЦ` сопоставляется с `ЕДЦ`. Перед запуском сохраните копию `spravochniki.xlsx`.
+
+### win_ocr.ps1
+Вспомогательный OCR для `core/rooms_pdf.py`, отдельно не запускается.

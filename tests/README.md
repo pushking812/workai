@@ -37,6 +37,12 @@ Excel и Word тесты не запускают: обращение к ним �
 - `test_reconcile_totals_empty_link.py` — `reconcile_totals.py` на книге с пустым листом `Связь_ВОР_СО` (одна пустая ячейка): суммы берутся из сводной.
 - Сверка Python-эталона с запросом `Связь_ВОР_СО` на реальных комплектах делается скриптом `scripts/compare_allocation.py`, не pytest.
 
+### Помещения, справочник, AI, СВОР и КЖ
+- `test_rooms_to_excel.py` — разбор экспликаций и сводный Excel; `test_ai_client.py`, `test_ai_check_list.py` — клиент Ask API (сеть подменяется) и список на проверку.
+- `test_reference_store.py` — справочник в БД: правила удаления и смены кода, дубли, `uid`, площадь. `test_reference_exchange.py` — выгрузка и загрузка xlsx, перенос экспликаций, прочерк как пусто, алиас `ЗДЦ`/`ЕДЦ`.
+- `test_svor.py`, `test_svor_link.py`, `test_svor_chain.py`, `test_cable_link.py`, `test_make_links_report.py` — СВОР (статус по числам, связь с ВОР, цепочка изменений), КЖ–СО и отчёт связей.
+- Последний полный прогон: 418 прошли, 2 пропущены.
+
 ## Чего нет
 - Нет тестов для `scripts/make_reconcile.py` и `reconcile_to_xlsx.py`; `reconcile_totals.py` покрыт только случаем пустого листа связи (в бэклоге).
 - Запросы `.pq` проверяются по тексту и на синтетике; настоящее обновление в Excel делают скрипты `scripts/pq_refresh_check.ps1`, `scripts/run_kit_check.py`, а не pytest.

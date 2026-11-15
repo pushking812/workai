@@ -430,7 +430,8 @@ function setStatus(text, progress) {
   if (progress != null) el.progress.value = progress;
 }
 
-function showError(text) {
+function showError(text, title = "Ошибка") {
+  $("error-title").textContent = title;
   $("error-text").textContent = text;
   $("error-popup").hidden = false;
 }
@@ -824,8 +825,28 @@ async function loadSettings() {
   if (typeof settings.background_mode === "boolean") el.background.checked = settings.background_mode;
   state.interval = Number(settings.interval_minutes) || 60;
   $("input-interval").value = state.interval;
+  $("chk-use-ai").checked = settings.use_ai === true;
+  showAiKeyState(settings);
   applyUi(settings.ui);
   if (state.root) await loadSubfolders();
+}
+
+function showAiKeyState(s) {
+  $("ai-key-state").textContent = s.ai_key_from_env ? "Ключ взят из переменной окружения ASK_API_KEY."
+    : s.ai_key_set ? "Ключ сохранён (в data/config.json)." : "Ключ не задан: AI работать не будет.";
+}
+
+async function saveAiSettings(withKey) {
+  const patch = { use_ai: $("chk-use-ai").checked };
+  const key = $("input-ai-key").value.trim();
+  if (withKey && key) patch.ai_api_key = key;
+  try {
+    const saved = await api().save_settings(patch);
+    if (withKey && key) $("input-ai-key").value = "";
+    showAiKeyState(saved);
+  } catch (e) {
+    showError(`Не удалось сохранить настройки AI: ${e}`);
+  }
 }
 
 async function persistSettings() {
@@ -1268,6 +1289,205 @@ async function onIgnoredDelete() {
   }
 }
 
+// ---------- Справочник помещений ----------
+
+const ref = { data: null, building: null, floor: null, room: null };
+
+function refUse(item) {
+  const parts = [];
+  if (item.children) parts.push(item.children);
+  if (item.external && item.external.length) parts.push(item.external.join("; "));
+  return parts.length ? ` (${parts.join("; ")})` : "";
+}
+
+function refItem(text, sub, selected, onClick) {
+  const li = dictItem("", selected, onClick);
+  const main = document.createElement("span");
+  main.textContent = text;
+  li.appendChild(main);
+  if (sub) {
+    const s = document.createElement("span");
+    s.className = "ref-sub";
+    s.textContent = sub;
+    li.appendChild(s);
+  }
+  return li;
+}
+
+function refAreaText(area) {
+  return area == null ? "" : `${String(area).replace(".", ",")} м²`;
+}
+
+function renderReference() {
+  const d = ref.data;
+  if (!d.buildings.some((b) => b.id === ref.building)) ref.building = d.buildings.length ? d.buildings[0].id : null;
+  const floors = d.floors.filter((f) => f.building_id === ref.building);
+  if (!floors.some((f) => f.id === ref.floor)) ref.floor = floors.length ? floors[0].id : null;
+  const rooms = d.rooms.filter((r) => r.floor_id === ref.floor);
+  if (!rooms.some((r) => r.id === ref.room)) ref.room = null;
+
+  const bl = $("ref-buildings");
+  bl.replaceChildren();
+  const fq = (id) => ($(id).value || "").trim().toLowerCase();
+  const match = (id, text) => !fq(id) || text.toLowerCase().includes(fq(id));
+  for (const b of d.buildings) {
+    const t = b.full ? `${b.code} - ${b.full}` : b.code;
+    if (b.id !== ref.building && !match("ref-filter-buildings", t)) continue;
+    bl.appendChild(refItem(t, "", b.id === ref.building, () => {
+      ref.building = b.id; ref.floor = null; ref.room = null;
+      refFillBuilding(); renderReference();
+    }));
+  }
+  const fl = $("ref-floors");
+  fl.replaceChildren();
+  for (const f of floors) {
+    const t = `${f.code} - ${f.name}`;
+    if (f.id !== ref.floor && !match("ref-filter-floors", t)) continue;
+    fl.appendChild(refItem(t, "",
+      f.id === ref.floor, () => {
+        ref.floor = f.id; ref.room = null;
+        refFillFloor(); renderReference();
+      }));
+  }
+  const rl = $("ref-rooms");
+  rl.replaceChildren();
+  for (const r of rooms) {
+    const t = `${r.code} - ${r.name}`;
+    if (r.id !== ref.room && !match("ref-filter-rooms", t)) continue;
+    rl.appendChild(refItem(t, "", r.id === ref.room, () => {
+      ref.room = r.id;
+      refFillRoom(); renderReference();
+    }));
+  }
+  const b = d.buildings.find((x) => x.id === ref.building);
+  const f = d.floors.find((x) => x.id === ref.floor);
+  $("ref-floors-head").textContent = b ? `Этажи: ${b.code}` : "Этажи";
+  $("ref-rooms-head").textContent = f && b ? `Помещения: ${b.code} / ${f.code}` : "Помещения";
+}
+
+function refFillBuilding() {
+  const b = ref.data.buildings.find((x) => x.id === ref.building);
+  $("ref-b-code").value = b ? b.code : "";
+  $("ref-b-full").value = b ? b.full : "";
+  const f = ref.data.floors.find((x) => x.building_id === ref.building);
+  ref.floor = f ? f.id : null;
+  refFillFloor();
+}
+
+function refFillFloor() {
+  const f = ref.data.floors.find((x) => x.id === ref.floor);
+  $("ref-f-code").value = f ? f.code : "";
+  $("ref-f-name").value = f ? f.name : "";
+  $("ref-f-ground").value = f ? f.ground : "";
+  ref.room = null;
+  refFillRoom();
+}
+
+function refFillRoom() {
+  const r = ref.data.rooms.find((x) => x.id === ref.room);
+  $("ref-r-code").value = r ? r.code : "";
+  $("ref-r-name").value = r ? r.name : "";
+  $("ref-r-ground").value = r ? r.ground : "";
+  $("ref-r-area").value = r && r.area != null ? refAreaText(r.area) : "";
+}
+
+async function refEdit(op, args) {
+  const result = await api().edit_reference(op, args);
+  if (result.status !== "ok") {
+    showError(result.message || "Не удалось изменить справочник");
+    return false;
+  }
+  ref.data = result;
+  return true;
+}
+
+async function openReference() {
+  const result = await api().get_reference();
+  if (result.status !== "ok") return showError(result.message || "Не удалось прочитать справочник");
+  ref.data = result;
+  ref.building = null; ref.floor = null; ref.room = null;
+  renderReference();
+  refFillBuilding();
+  renderReference();
+  $("ref-popup").hidden = false;
+}
+
+function refNewId(before, after) {
+  const old = new Set(before.map((x) => x.id));
+  const added = after.find((x) => !old.has(x.id));
+  return added ? added.id : null;
+}
+
+async function onRefAdd(kind) {
+  const d = ref.data;
+  if (kind === "building") {
+    const before = d.buildings;
+    if (await refEdit("add_building", { code: dictValue("ref-b-code"), full: dictValue("ref-b-full") })) {
+      ref.building = refNewId(before, ref.data.buildings);
+      refFillBuilding(); renderReference();
+    }
+  } else if (kind === "floor") {
+    if (!ref.building) return showError("Сначала выберите здание.");
+    const before = d.floors;
+    if (await refEdit("add_floor", { building_id: ref.building, code: dictValue("ref-f-code"), name: dictValue("ref-f-name"), ground: $("ref-f-ground").value })) {
+      ref.floor = refNewId(before, ref.data.floors);
+      refFillFloor(); renderReference();
+    }
+  } else {
+    if (!ref.floor) return showError("Сначала выберите этаж.");
+    const before = d.rooms;
+    if (await refEdit("add_room", { floor_id: ref.floor, code: dictValue("ref-r-code"), name: dictValue("ref-r-name"), ground: $("ref-r-ground").value })) {
+      ref.room = refNewId(before, ref.data.rooms);
+      refFillRoom(); renderReference();
+    }
+  }
+}
+
+async function onRefSave(kind) {
+  const id = ref[kind];
+  if (!id) return showError("Выберите элемент в списке и измените поля.");
+  const p = { building: ["b", "building"], floor: ["f", "floor"], room: ["r", "room"] }[kind][0];
+  const args = { id, code: dictValue(`ref-${p}-code`) };
+  if (kind === "building") args.full = dictValue("ref-b-full");
+  else { args.name = dictValue(`ref-${p}-name`); args.ground = $(`ref-${p}-ground`).value; }
+  if (await refEdit(`update_${kind}`, args)) renderReference();
+}
+
+async function onRefDelete(kind) {
+  const id = ref[kind];
+  if (!id) return;
+  const list = { building: ref.data.buildings, floor: ref.data.floors, room: ref.data.rooms }[kind];
+  const item = list.find((x) => x.id === id);
+  if (!(await confirmDialog(`Удалить «${item.code}»?`))) return;
+  if (await refEdit(`delete_${kind}`, { id })) {
+    ref[kind] = null;
+    renderReference();
+    if (kind === "building") refFillBuilding(); else if (kind === "floor") refFillFloor(); else refFillRoom();
+    renderReference();
+  }
+}
+
+async function onRefExport() {
+  const res = await api().export_reference();
+  if (res.status === "cancelled") return;
+  if (res.status !== "ok") return showError(res.message || "Не удалось выгрузить справочник");
+  showError(`Выгружено: зданий ${res.buildings}, этажей ${res.floors}, помещений ${res.rooms}.\n${res.path}`, "Справочник выгружен");
+}
+
+async function onRefImport() {
+  const res = await api().import_reference();
+  if (res.status === "cancelled") return;
+  if (res.status !== "ok") return showError(res.message || "Не удалось загрузить справочник");
+  if (res.reference && res.reference.status === "ok") {
+    ref.data = res.reference;
+    refFillBuilding(); renderReference();
+  }
+  const a = res.added, u = res.updated;
+  showError(`Добавлено: зданий ${a.buildings}, этажей ${a.floors}, помещений ${a.rooms}.\n` +
+    `Изменено: зданий ${u.buildings}, этажей ${u.floors}, помещений ${u.rooms}.\nУдаление в файле не применяется.`,
+    "Справочник загружен");
+}
+
 // ---------- Запуск ----------
 
 function bind() {
@@ -1309,6 +1529,18 @@ function bind() {
   $("dict-ignored-rename").addEventListener("click", onIgnoredRename);
   $("dict-ignored-delete").addEventListener("click", onIgnoredDelete);
   $("dict-close").addEventListener("click", () => { $("dict-popup").hidden = true; });
+  $("btn-reference").addEventListener("click", openReference);
+  for (const id of ["ref-filter-buildings", "ref-filter-floors", "ref-filter-rooms"]) {
+    $(id).addEventListener("input", () => { if (ref.data) renderReference(); });
+  }
+  for (const [prefix, kind] of [["b", "building"], ["f", "floor"], ["r", "room"]]) {
+    $(`ref-${prefix}-add`).addEventListener("click", () => onRefAdd(kind));
+    $(`ref-${prefix}-save`).addEventListener("click", () => onRefSave(kind));
+    $(`ref-${prefix}-delete`).addEventListener("click", () => onRefDelete(kind));
+  }
+  $("ref-close").addEventListener("click", () => { $("ref-popup").hidden = true; });
+  $("ref-export").addEventListener("click", onRefExport);
+  $("ref-import").addEventListener("click", onRefImport);
   $("settings-close").addEventListener("click", () => { $("settings-popup").hidden = true; });
   el.selectAll.addEventListener("click", toggleAll);
 $("btn-toggle-tree").addEventListener("click", toggleTree);
@@ -1325,6 +1557,8 @@ $("btn-toggle-tree").addEventListener("click", toggleTree);
   }
   el.background.addEventListener("change", () => onSettingsChanged(el.background.checked));
   $("input-interval").addEventListener("change", () => onSettingsChanged(false));
+  $("chk-use-ai").addEventListener("change", () => saveAiSettings(false));
+  $("input-ai-key").addEventListener("change", () => saveAiSettings(true));
 }
 
 async function init() {

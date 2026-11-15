@@ -152,3 +152,18 @@ tbody tr.group:hover { background: #cfdbe8; }
 .dict-row input[type=text] { flex: 1; min-width: 0; }
 .dict-row { flex-wrap: nowrap; }
 .icon-btn { flex: none; width: 32px; padding: 4px 0; text-align: center; }
+.ref-fields { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.ref-fields input, .ref-fields select { min-width: 0; width: 100%; box-sizing: border-box; }
+.ref-line { display: flex; gap: 4px; align-items: stretch; }
+.ref-line input { flex: 1; width: auto; }
+.ref-line input.ref-short { flex: none; width: 7ch; }
+#ref-popup select { min-height: 31px; padding: 5px 8px; border: 1px solid #bcccdc; border-radius: 4px; font: inherit; box-sizing: border-box; }
+.ref-line select.ref-sel { flex: none; width: auto; }
+.ref-line select.ref-sel.ref-fill { flex: 1; width: auto; min-width: 0; }
+#ref-b-code, #ref-f-code { width: calc(5ch + 18px); }
+#ref-buildings li, #ref-floors li, #ref-rooms li { cursor: pointer; }
+#ref-popup .dict-list { border: 1px solid #bcccdc; }
+#ref-popup input[readonly] { background: #f3f5f7; color: #4b5866; cursor: default; }
+#ref-popup .dict-list li { box-sizing: border-box; min-height: 31px; align-items: center; padding: 5px 8px; border: 1px solid transparent; }
+.dict-list li .ref-sub { color: #6b7785; font-size: 90%; }
+.ref-filter { width: 100%; box-sizing: border-box; margin: 0 0 6px 0; }

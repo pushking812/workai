@@ -22,7 +22,21 @@ DEFAULTS: dict[str, Any] = {
     "background_mode": True,
     "interval_minutes": 60,
     "ui": {},
+    # AI-модель (docs/Ask API docs.txt): по умолчанию выключено; ключ можно не хранить,
+    # а задать переменной окружения ASK_API_KEY (она главнее).
+    "use_ai": False,
+    "ai_api_key": "",
+    "ai_model": "",
 }
+
+
+def public_view(settings: dict[str, Any]) -> dict[str, Any]:
+    """Настройки для окна: ключ AI наружу не отдаётся, только признак «ключ есть»."""
+    data = dict(settings)
+    data["ai_key_set"] = bool(os.environ.get("ASK_API_KEY") or data.get("ai_api_key"))
+    data["ai_key_from_env"] = bool(os.environ.get("ASK_API_KEY"))
+    data.pop("ai_api_key", None)
+    return data
 
 
 def _str_list(raw: Any) -> list[str]:
@@ -110,6 +124,12 @@ def _normalize(raw: Any) -> dict[str, Any]:
         minutes = DEFAULTS["interval_minutes"]
     data["interval_minutes"] = max(1, min(minutes, 24 * 60))
     data["ui"] = _normalize_ui(raw.get("ui"))
+    if isinstance(raw.get("use_ai"), bool):
+        data["use_ai"] = raw["use_ai"]
+    if isinstance(raw.get("ai_api_key"), str):
+        data["ai_api_key"] = raw["ai_api_key"].strip()
+    if isinstance(raw.get("ai_model"), str):
+        data["ai_model"] = raw["ai_model"].strip()
     return data
 
 
